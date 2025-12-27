@@ -19,7 +19,10 @@ const createPrismaClient = () => {
     if (!connectionString) {
         console.error("ERROR: DATABASE_URL is not defined in the environment functions.");
     }
-    const pool = new Pool({ connectionString });
+    const pool = new Pool({
+        connectionString,
+        ssl: process.env.NODE_ENV === "production" ? { rejectUnauthorized: false } : undefined,
+    });
     const adapter = new PrismaPg(pool);
     return new PrismaClient({ adapter });
 };
