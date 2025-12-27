@@ -1,34 +1,32 @@
 import { NextRequest, NextResponse } from "next/server";
-import { triggerIngest } from "@/lib/webhooks";
 import prisma from "@/lib/prisma";
+import { triggerIngest } from "@/lib/webhooks";
+import { formatN8nDataToMarkdown } from "@/lib/formatters";
+import { SIGNAL_STATUS, TITLE_MAX_LENGTH } from "@/lib/constants";
+import type { IngestRequest, N8nResponse } from "@/lib/types";
 
 /**
  * POST /api/ingest
  * 
- * Frontend endpoint to trigger n8n ingest workflow.
- * Supports: text, url, youtube, file
+ * Frontend endpoint to trigger n8n ingest workflow for content processing.
  * 
- * n8n workflow expects:
- * - text: { inputType: "text", content: "..." }
- * - url: { inputType: "url", url: "..." }
- * - youtube: { inputType: "youtube", url: "..." }
- * - file: { inputType: "file", content: "base64..." }
+ * Supports multiple input types:
+ * - text: Direct text content
+ * - url: Web article URLs
+ * - youtube: YouTube video URLs
+ * - file: Base64-encoded file content
  * 
- * n8n returns:
- * - summary, key_insights[], actionable_takeaways[], topics[], sentiment
+ * The n8n workflow processes the content and returns structured data
+ * (summary, key insights, topics, sentiment) which is stored as a Signal.
+ * 
+ * @param request - Next.js request object
+ * @returns JSON response with success status and signal ID
  */
-
-interface IngestRequest {
-    inputType: "text" | "url" | "youtube" | "file";
-    content?: string;  // For text and file (base64)
-    url?: string;      // For url and youtube
-    title?: string;    // Optional title for manual notes
-}
-
 export async function POST(request: NextRequest) {
     try {
         const body = await request.json() as IngestRequest;
 
+        // Validate required fields
         if (!body.inputType) {
             return NextResponse.json(
                 { error: "inputType is required (text, url, youtube, file)" },
@@ -36,7 +34,7 @@ export async function POST(request: NextRequest) {
             );
         }
 
-        // Validate based on type
+        // Validate based on input type
         if ((body.inputType === "text" || body.inputType === "file") && !body.content) {
             return NextResponse.json(
                 { error: "content is required for text and file types" },
@@ -51,7 +49,7 @@ export async function POST(request: NextRequest) {
             );
         }
 
-        // Build payload matching n8n workflow format
+        // Build payload for n8n workflow
         const payload: Record<string, string> = {
             inputType: body.inputType,
         };
@@ -63,6 +61,7 @@ export async function POST(request: NextRequest) {
             payload.url = body.url;
         }
 
+        // Trigger n8n ingestion workflow
         const result = await triggerIngest(payload);
 
         console.log("triggerIngest result:", JSON.stringify(result, null, 2));
@@ -74,22 +73,12 @@ export async function POST(request: NextRequest) {
             );
         }
 
-        // If n8n returns data directly (synchronous), create signal immediately
+        // If n8n returns data synchronously, create signal immediately
         if (result.data) {
             const data = result.data;
             console.log("Creating signal from n8n data:", JSON.stringify(data, null, 2));
 
-            // Create signal from n8n response
-            const signal = await prisma.signal.create({
-                data: {
-                    title: body.title || data.summary?.substring(0, 100) || "Extracted Insight",
-                    content: formatN8nResponse(data),
-                    source: body.inputType,
-                    sourceUrl: body.url,
-                    tags: JSON.stringify(data.topics || []),
-                    status: "unread",
-                },
-            });
+            const signal = await createSignalFromN8nData(data, body);
 
             return NextResponse.json({
                 success: true,
@@ -99,6 +88,7 @@ export async function POST(request: NextRequest) {
             }, { status: 201 });
         }
 
+        // n8n processing asynchronously - signal will be created via webhook
         return NextResponse.json({
             success: true,
             message: "Content sent to n8n for processing",
@@ -114,37 +104,10 @@ export async function POST(request: NextRequest) {
 }
 
 /**
- * Format n8n response into readable signal content
+ * GET /api/ingest
+ * 
+ * Returns API documentation and supported input types
  */
-function formatN8nResponse(data: {
-    summary?: string;
-    key_insights?: string[];
-    actionable_takeaways?: string[];
-    topics?: string[];
-    sentiment?: string;
-}): string {
-    const parts: string[] = [];
-
-    if (data.summary) {
-        parts.push(`## Summary\n${data.summary}`);
-    }
-
-    if (data.key_insights?.length) {
-        parts.push(`## Key Insights\n${data.key_insights.map(i => `• ${i}`).join("\n")}`);
-    }
-
-    if (data.actionable_takeaways?.length) {
-        parts.push(`## Actionable Takeaways\n${data.actionable_takeaways.map(t => `• ${t}`).join("\n")}`);
-    }
-
-    if (data.sentiment) {
-        parts.push(`## Sentiment\n${data.sentiment}`);
-    }
-
-    return parts.join("\n\n");
-}
-
-// GET endpoint to verify
 export async function GET() {
     return NextResponse.json({
         status: "ok",
@@ -155,6 +118,37 @@ export async function GET() {
             url: { inputType: "url", url: "https://..." },
             youtube: { inputType: "youtube", url: "https://youtube.com/watch?v=..." },
             file: { inputType: "file", content: "base64-encoded-data" },
+        },
+    });
+}
+
+// ============================================================================
+// Helper Functions
+// ============================================================================
+
+/**
+ * Creates a Signal database record from n8n response data
+ * 
+ * @param data - Structured data from n8n workflow
+ * @param request - Original ingest request
+ * @returns Created Signal record
+ */
+async function createSignalFromN8nData(data: N8nResponse, request: IngestRequest) {
+    const title = request.title
+        || data.summary?.substring(0, TITLE_MAX_LENGTH)
+        || "Extracted Insight";
+
+    const content = formatN8nDataToMarkdown(data);
+    const tags = data.topics || [];
+
+    return await prisma.signal.create({
+        data: {
+            title,
+            content,
+            source: request.inputType,
+            sourceUrl: request.url,
+            tags: JSON.stringify(tags),
+            status: SIGNAL_STATUS.UNREAD,
         },
     });
 }

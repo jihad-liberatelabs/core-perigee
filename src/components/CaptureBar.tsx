@@ -1,17 +1,42 @@
 "use client";
 
 import { useState } from "react";
-import useSWR from "swr";
+import { URL_PATTERN, YOUTUBE_PATTERN } from "@/lib/constants";
 
+/**
+ * CaptureBar Component Props
+ */
 interface CaptureBarProps {
+    /** Callback fired when a signal is successfully added */
     onSignalAdded?: () => void;
 }
 
+/**
+ * CaptureBar Component
+ * 
+ * Primary input component for capturing signals (thoughts, URLs, YouTube links).
+ * Automatically detects input type and sends to the ingestion API.
+ * 
+ * Features:
+ * - Auto-detection of URLs and YouTube links
+ * - Visual feedback for loading and success states
+ * - Error handling with visual indicators
+ * - Async processing with n8n workflow
+ */
 export default function CaptureBar({ onSignalAdded }: CaptureBarProps) {
     const [input, setInput] = useState("");
     const [loading, setLoading] = useState(false);
     const [status, setStatus] = useState<"idle" | "success" | "error">("idle");
 
+    /**
+     * Handles form submission and content ingestion
+     * 
+     * Workflow:
+     * 1. Detects content type (URL, YouTube, or text)
+     * 2. Sends to /api/ingest for processing
+     * 3. Updates UI with success/error state
+     * 4. Triggers parent refresh callback
+     */
     async function handleSubmit(e: React.FormEvent) {
         e.preventDefault();
         if (!input.trim() || loading) return;
@@ -20,15 +45,18 @@ export default function CaptureBar({ onSignalAdded }: CaptureBarProps) {
         setStatus("idle");
 
         try {
-            // 1. Determine type (URL vs Text)
-            const isUrl = /^(http|https):\/\/[^ "]+$/.test(input.trim());
-            const inputType = isUrl ? (input.includes("youtube.com") || input.includes("youtu.be") ? "youtube" : "url") : "text";
+            // Detect input type
+            const isUrl = URL_PATTERN.test(input.trim());
+            const inputType = isUrl
+                ? (YOUTUBE_PATTERN.test(input) ? "youtube" : "url")
+                : "text";
 
-            // 2. Build payload
-            const payload: any = { inputType };
+            // Build payload based on type
+            const payload: Record<string, string> = { inputType };
+
             if (inputType === "text") {
                 payload.content = input.trim();
-                // Heuristic title for text notes
+                // Generate a simple title from first line
                 payload.title = input.split('\n')[0].substring(0, 50);
             } else {
                 payload.url = input.trim();
@@ -36,7 +64,7 @@ export default function CaptureBar({ onSignalAdded }: CaptureBarProps) {
 
             console.log("Capturing:", payload);
 
-            // 3. Send to internal API proxy (avoids CORS)
+            // Send to ingestion API
             const res = await fetch("/api/ingest", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
@@ -45,11 +73,11 @@ export default function CaptureBar({ onSignalAdded }: CaptureBarProps) {
 
             if (!res.ok) throw new Error("Failed to capture");
 
-            // 4. Reset UI immediately
+            // Reset UI and show success
             setInput("");
             setStatus("success");
 
-            // Trigger refresh
+            // Trigger parent refresh after delay
             setTimeout(() => {
                 setStatus("idle");
                 onSignalAdded?.();
@@ -77,7 +105,7 @@ export default function CaptureBar({ onSignalAdded }: CaptureBarProps) {
                         boxShadow: "var(--shadow-md)"
                     }}
                 >
-                    {/* Icon based on input content */}
+                    {/* Status Icon */}
                     <div className="pl-4 text-[var(--text-muted)]">
                         {loading ? (
                             <svg className="animate-spin h-5 w-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
@@ -95,6 +123,7 @@ export default function CaptureBar({ onSignalAdded }: CaptureBarProps) {
                         )}
                     </div>
 
+                    {/* Input Field */}
                     <input
                         type="text"
                         value={input}
@@ -105,6 +134,7 @@ export default function CaptureBar({ onSignalAdded }: CaptureBarProps) {
                         autoFocus
                     />
 
+                    {/* Submit Button */}
                     <div className="pr-2">
                         <button
                             type="submit"
@@ -125,9 +155,11 @@ export default function CaptureBar({ onSignalAdded }: CaptureBarProps) {
                     </div>
                 </div>
 
-                {/* Helper text / Status */}
-                <div className="absolute top-full left-0 mt-2 px-1 text-xs font-medium transition-opacity duration-300"
-                    style={{ opacity: status === 'success' ? 1 : 0, color: "var(--success)" }}>
+                {/* Success Message */}
+                <div
+                    className="absolute top-full left-0 mt-2 px-1 text-xs font-medium transition-opacity duration-300"
+                    style={{ opacity: status === 'success' ? 1 : 0, color: "var(--success)" }}
+                >
                     Captured! Processing in background...
                 </div>
             </form>

@@ -1,26 +1,45 @@
 import { NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
 import { triggerCluster } from "@/lib/webhooks";
+import { parseSignalTags } from "@/lib/formatters";
+import { SIGNAL_STATUS } from "@/lib/constants";
 
+/**
+ * POST /api/cluster
+ * 
+ * Triggers the clustering workflow to group related reviewed signals into insights.
+ * 
+ * Workflow:
+ * 1. Fetches all signals with "reviewed" status
+ * 2. Sends signals to n8n clustering workflow
+ * 3. Updates signal status to "clustered" to prevent reprocessing
+ * 
+ * The n8n workflow analyzes signal content, tags, and thoughts to identify
+ * thematic patterns and automatically create insight drafts.
+ * 
+ * @returns JSON response with count of clustered signals
+ */
 export async function POST() {
     try {
-        // 1. Fetch all reviewed signals
+        // Fetch all reviewed signals with their associated thoughts
         const signals = await prisma.signal.findMany({
-            where: { status: "reviewed" },
+            where: { status: SIGNAL_STATUS.REVIEWED },
             include: { thoughts: true }
         });
 
         if (signals.length === 0) {
-            return NextResponse.json({ message: "No reviewed signals to cluster" });
+            return NextResponse.json({
+                message: "No reviewed signals to cluster"
+            });
         }
 
-        // 2. Parse tags and structure data
-        const structuredSignals = signals.map(s => ({
-            ...s,
-            tags: JSON.parse(s.tags),
+        // Parse JSON tags into arrays for n8n processing
+        const structuredSignals = signals.map(signal => ({
+            ...signal,
+            tags: parseSignalTags(signal.tags),
         }));
 
-        // 3. Send to n8n
+        // Trigger n8n clustering workflow
         const result = await triggerCluster(structuredSignals);
 
         if (!result.success) {
@@ -30,10 +49,10 @@ export async function POST() {
             );
         }
 
-        // 4. Update status to 'clustered' to prevent re-processing
+        // Mark signals as clustered to prevent duplicate processing
         await prisma.signal.updateMany({
             where: { id: { in: signals.map(s => s.id) } },
-            data: { status: "clustered" }
+            data: { status: SIGNAL_STATUS.CLUSTERED }
         });
 
         return NextResponse.json({

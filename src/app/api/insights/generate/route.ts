@@ -1,13 +1,27 @@
 import { NextRequest, NextResponse } from "next/server";
+import prisma from "@/lib/prisma";
 import { triggerGenerate } from "@/lib/webhooks";
 
-import prisma from "@/lib/prisma";
-
+/**
+ * POST /api/insights/generate
+ * 
+ * Triggers AI-powered insight generation from selected signals.
+ * 
+ * The n8n workflow analyzes the provided signals and generates
+ * synthetic insights by identifying patterns, themes, and connections.
+ * 
+ * Request body:
+ * - signalIds: Array of signal IDs to analyze (required)
+ * 
+ * @param request - Next.js request object
+ * @returns JSON response confirming generation was triggered
+ */
 export async function POST(request: NextRequest) {
     try {
         const body = await request.json();
         const { signalIds } = body;
 
+        // Validate signal IDs
         if (!signalIds || !Array.isArray(signalIds) || signalIds.length === 0) {
             return NextResponse.json(
                 { error: "signalIds array is required" },
@@ -15,7 +29,7 @@ export async function POST(request: NextRequest) {
             );
         }
 
-        // Fetch full signal objects
+        // Fetch full signal objects for n8n processing
         const signals = await prisma.signal.findMany({
             where: {
                 id: { in: signalIds }
@@ -29,6 +43,7 @@ export async function POST(request: NextRequest) {
             );
         }
 
+        // Trigger n8n generation workflow
         const result = await triggerGenerate(signals);
 
         if (!result.success) {

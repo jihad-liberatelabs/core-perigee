@@ -1,42 +1,32 @@
 import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
+import { formatN8nDataToMarkdown } from "@/lib/formatters";
+import { SIGNAL_STATUS, TITLE_MAX_LENGTH } from "@/lib/constants";
+import type { N8nResponse } from "@/lib/types";
 
 /**
  * POST /api/signals/receive
  * 
- * Receives processed signals from n8n after ingestion and extraction.
+ * Webhook endpoint that receives processed signals from n8n after ingestion.
+ * This endpoint is called by n8n workflows when they complete content extraction.
  * 
- * Expected payload from n8n (flexible):
- * Can be flat: { summary, key_insights, topics }
- * Or nested: { output: { summary, key_insights, topics } }
+ * The payload structure is flexible to handle different n8n workflow formats:
+ * - Flat structure: { summary, key_insights, topics, ... }
+ * - Nested structure: { output: { summary, key_insights, ... } }
+ * - Array structure: [{ output: { ... } }]
+ * 
+ * @param request - Next.js request object containing n8n payload
+ * @returns JSON response with created signal ID
  */
-
-interface N8nData {
-    summary?: string;
-    key_insights?: string[];
-    actionable_takeaways?: string[];
-    topics?: string[];
-    sentiment?: string;
-    source?: string;
-    sourceUrl?: string;
-    title?: string;
-}
-
 export async function POST(request: NextRequest) {
     try {
         const body = await request.json();
         console.log("Receive webhook payload:", JSON.stringify(body, null, 2));
 
-        // 1. Extract data - handle nested "output" structure if present
-        let data: N8nData = body;
+        // Extract data from potentially nested structure
+        const data = extractN8nData(body);
 
-        if (body.output && typeof body.output === 'object') {
-            data = { ...body.output, ...body }; // Merge top-level props like source/url
-        } else if (Array.isArray(body) && body.length > 0) {
-            data = body[0].output || body[0];
-        }
-
-        // 2. Validate essential data
+        // Validate essential data is present
         if (!data.summary && !data.key_insights && !data.title) {
             return NextResponse.json(
                 { error: "Invalid payload: missing summary or insights" },
@@ -44,22 +34,8 @@ export async function POST(request: NextRequest) {
             );
         }
 
-        // 3. Format content for Markdown display
-        const content = formatContent(data);
-        const title = data.title || data.summary?.substring(0, 100) || "Extracted Insight";
-        const tags = data.topics || [];
-
-        // 4. Create Signal
-        const signal = await prisma.signal.create({
-            data: {
-                title,
-                content,
-                source: data.source || "n8n",
-                sourceUrl: data.sourceUrl,
-                tags: JSON.stringify(tags),
-                status: "unread",
-            },
-        });
+        // Create Signal from extracted data
+        const signal = await createSignalFromWebhook(data);
 
         console.log("Created signal:", signal.id);
 
@@ -78,27 +54,66 @@ export async function POST(request: NextRequest) {
     }
 }
 
+// ============================================================================
+// Helper Functions
+// ============================================================================
+
 /**
- * Format extracted data into Markdown content
+ * Extracts n8n data from various payload structures
+ * 
+ * Handles multiple formats:
+ * 1. Direct object: { summary, key_insights, ... }
+ * 2. Nested in output: { output: { summary, ... } }
+ * 3. Array format: [{ output: { ... } }]
+ * 
+ * @param body - Raw webhook payload
+ * @returns Normalized N8nResponse data
  */
-function formatContent(data: N8nData): string {
-    const parts: string[] = [];
-
-    if (data.summary) {
-        parts.push(`## Summary\n${data.summary}`);
+function extractN8nData(body: unknown): N8nResponse {
+    // Handle array format
+    if (Array.isArray(body) && body.length > 0) {
+        const firstItem = body[0];
+        return (firstItem.output as N8nResponse) || (firstItem as N8nResponse);
     }
 
-    if (data.key_insights?.length) {
-        parts.push(`## Key Insights\n${data.key_insights.map(i => `• ${i}`).join("\n")}`);
+    // Handle object format
+    if (body && typeof body === 'object') {
+        const obj = body as Record<string, unknown>;
+
+        // Check if data is nested in 'output' field
+        if (obj.output && typeof obj.output === 'object') {
+            // Merge top-level props (like source, sourceUrl) with nested output
+            return { ...obj, ...(obj.output as object) } as N8nResponse;
+        }
+
+        return body as N8nResponse;
     }
 
-    if (data.actionable_takeaways?.length) {
-        parts.push(`## Actionable Takeaways\n${data.actionable_takeaways.map(t => `• ${t}`).join("\n")}`);
-    }
+    return {};
+}
 
-    if (data.sentiment) {
-        parts.push(`## Sentiment\n${data.sentiment}`);
-    }
+/**
+ * Creates a Signal database record from webhook data
+ * 
+ * @param data - Extracted n8n response data
+ * @returns Created Signal record
+ */
+async function createSignalFromWebhook(data: N8nResponse) {
+    const title = data.title
+        || data.summary?.substring(0, TITLE_MAX_LENGTH)
+        || "Extracted Insight";
 
-    return parts.join("\n\n");
+    const content = formatN8nDataToMarkdown(data);
+    const tags = data.topics || [];
+
+    return await prisma.signal.create({
+        data: {
+            title,
+            content,
+            source: data.source || "n8n",
+            sourceUrl: data.sourceUrl,
+            tags: JSON.stringify(tags),
+            status: SIGNAL_STATUS.UNREAD,
+        },
+    });
 }

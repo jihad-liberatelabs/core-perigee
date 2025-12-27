@@ -3,9 +3,18 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
+/**
+ * Application Header Component
+ * 
+ * Provides consistent navigation across all pages with sticky positioning.
+ * Highlights the active page and includes the Signal Desk branding.
+ */
 export default function AppHeader() {
     const pathname = usePathname();
 
+    /**
+     * Checks if the given path matches the current pathname
+     */
     const isActive = (path: string) => pathname === path;
 
     return (
@@ -45,7 +54,18 @@ export default function AppHeader() {
     );
 }
 
-function NavLink({ href, active, children }: { href: string; active: boolean; children: React.ReactNode }) {
+/**
+ * Navigation Link Component
+ * 
+ * @param href - Target route path
+ * @param active - Whether this link represents the current page
+ * @param children - Link text content
+ */
+function NavLink({ href, active, children }: {
+    href: string;
+    active: boolean;
+    children: React.ReactNode
+}) {
     return (
         <Link
             href={href}

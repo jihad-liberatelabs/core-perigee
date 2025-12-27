@@ -1,36 +1,132 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Core Perigee (Signal Desk)
 
-## Getting Started
+Core Perigee is a personal **Signal-to-Insight Operating System** designed to help you capture, process, and transform raw information (signals) into structured, actionable insights and social content.
 
-First, run the development server:
+## 🏗 Architecture Overview
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+Core Perigee is designed as a **decoupled, event-driven system** that separates user interaction from heavy-duty AI processing. This architecture allows for a responsive UI while complex workflows occur asynchronously in the background.
+
+### System Components
+
+1.  **Next.js Frontend (App Router)**:
+    *   Serves as the primary Command Center.
+    *   Handles UI for signal capture, manual review, and insight management.
+    *   Uses **SWR** for real-time UI updates and data fetching.
+    *   Implements **API Routes** as a gateway for both the frontend and external webhook callbacks.
+
+2.  **Data Layer (Prisma + SQLite)**:
+    *   Uses **SQLite** for local, high-performance data storage.
+    *   **Prisma ORM** provides type-safe database access and handles schema migrations.
+    *   The schema is designed to maintain relational integrity between raw signals, user thoughts, and synthesized insights.
+
+3.  **Orchestration Layer (n8n & Webhooks)**:
+    *   Core logic for AI processing is offloaded to external **n8n workflows**.
+    *   Communication is handled via outbound webhooks (triggered by the app) and inbound callbacks (updates from n8n).
+    *   This allows for easy modification of the AI logic without redeploying the core application.
+
+### Data Flow Pipeline
+
+The system follows a linear progression from raw data to published content:
+
+1.  **Ingestion**: Raw inputs (text, URLs, YouTube links) are sent to the `Ingest` webhook. n8n extracts content, generates summaries, and identifies key entities, which are then saved as **Signals**.
+2.  **Review**: The user reviews Signals in the **Review Queue**, adding **Highlights** and **Thoughts** to refine the information.
+3.  **Clustering**: Related signals are grouped together via the `Cluster` webhook to identify underlying themes or "Signal Clouds."
+4.  **Synthesis**: The `Generate` webhook processes these clusters to synthesize a **Core Insight**.
+5.  **Distribution**: The `Format` and `Publish` webhooks prepare the insight for specific platforms (LinkedIn, Twitter, etc.) and handle the final posting.
+
+### Database Schema
+
+The core domain model consists of:
+
+-   **Signal**: The atomic unit of information. Contains raw content, source metadata, and processing status.
+-   **Highlight**: Specific, granular points extracted from a Signal during review.
+-   **Thought**: User-generated reflections or notes that can be linked to either a Signal or an Insight.
+-   **Insight**: The high-level synthesis of multiple Signals and Thoughts.
+-   **WebhookConfig**: Dynamic configuration for external service URLs, managed via the Settings UI.
+
+```mermaid
+graph TD
+    subgraph "Signal Desk (Next.js)"
+        UI[User Interface]
+        API[API Routes]
+        DB[(Prisma / SQLite)]
+    end
+
+    subgraph "Automation (n8n)"
+        IW[Ingest Workflow]
+        CW[Cluster Workflow]
+        GW[Generate Workflow]
+        FW[Format Workflow]
+    end
+
+    UI --> API
+    API <--> DB
+    API -- "Trigger (POST)" --> IW
+    IW -- "Callback (POST)" --> API
+    API -- "Trigger (POST)" --> CW
+    CW -- "Callback (POST)" --> API
+    API -- "Trigger (POST)" --> GW
+    GW -- "Callback (POST)" --> API
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## 🚀 Getting Started
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+Follow these steps to set up the project locally.
 
-## Learn More
+### Prerequisites
+- [Node.js](https://nodejs.org/) (v18 or higher recommended)
+- [npm](https://www.npmjs.com/) or [yarn](https://yarnpkg.com/)
 
-To learn more about Next.js, take a look at the following resources:
+### Installation
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+1. **Clone the repository**:
+   ```bash
+   git clone <repository-url>
+   cd core-perigee
+   ```
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+2. **Install dependencies**:
+   ```bash
+   npm install
+   ```
 
-## Deploy on Vercel
+3. **Database Setup**:
+   Initialize the SQLite database and generate the Prisma client:
+   ```bash
+   npx prisma generate
+   npx prisma migrate dev --name init
+   ```
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+4. **Configuration**:
+   The application relies on webhooks for advanced processing. Once the app is running, navigate to the **Settings** page in the UI to configure your webhook URLs for:
+   - **Ingest**: Processing raw input (URLs, text).
+   - **Cluster**: Grouping related signals.
+   - **Generate**: AI-driven insight creation.
+   - **Format**: Social media post formatting.
+   - **Publish**: Finalizing and posting content.
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+### Development
+
+Start the development server:
+```bash
+npm run dev
+```
+
+Open [http://localhost:3000](http://localhost:3000) to access the Signal Desk.
+
+## 📂 Project Structure
+
+- `src/app/`: Next.js App Router pages and API routes.
+- `src/components/`: Reusable UI components.
+- `src/lib/`: Core utilities, Prisma client, and webhook handlers.
+- `prisma/`: Database schema and migrations.
+- `scripts/`: Maintenance and utility scripts (e.g., `debug_webhooks.ts`).
+
+## 🛠 Features
+
+- **Signal Inbox**: Capture and manage raw information from various sources.
+- **Thought Capture**: Attach quick notes and reflections to signals.
+- **Insight Generation**: Transform groups of signals into cohesive insights via AI.
+- **Processing Queue**: Track the progress of asynchronous tasks triggered by webhooks.
+- **Social Integration**: Format and prepare insights for platforms like LinkedIn or Twitter.

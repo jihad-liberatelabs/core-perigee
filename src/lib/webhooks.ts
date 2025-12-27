@@ -1,33 +1,27 @@
 import prisma from "./prisma";
+import { WEBHOOK_NAMES, WEBHOOK_TIMEOUT_MS } from "./constants";
+import type { FormatPayload, PublishPayload, WebhookResult, N8nResponse } from "./types";
 
 /**
- * Webhook trigger utilities for outbound calls to n8n
+ * Webhook trigger utilities for outbound calls to n8n workflows
+ * 
+ * This module provides functions to trigger various n8n workflows:
+ * - Ingest: Process raw input (URLs, text, YouTube)
+ * - Cluster: Group related signals
+ * - Generate: AI-powered insight generation
+ * - Format: Social media content formatting
+ * - Publish: Post content to platforms
  */
 
-interface FormatPayload {
-    insightId: string;
-    coreInsight: string;
-    context: string[];
-    platform: string;
-    tone?: "analytical" | "reflective" | "decisive";
-}
-
-interface PublishPayload {
-    insightId: string;
-    formattedContent: string;
-    platform: string;
-}
-
-interface N8nResponse {
-    summary?: string;
-    key_insights?: string[];
-    actionable_takeaways?: string[];
-    topics?: string[];
-    sentiment?: string;
-}
+// ============================================================================
+// Webhook URL Management
+// ============================================================================
 
 /**
- * Get webhook URL from database configuration
+ * Retrieves webhook URL from database configuration
+ * 
+ * @param name - Webhook configuration name
+ * @returns Webhook URL or null if not configured
  */
 async function getWebhookUrl(name: string): Promise<string | null> {
     const config = await prisma.webhookConfig.findUnique({
@@ -36,18 +30,30 @@ async function getWebhookUrl(name: string): Promise<string | null> {
     return config?.url ?? null;
 }
 
+// ============================================================================
+// Ingest Workflow
+// ============================================================================
+
 /**
- * Trigger ingestion webhook to process raw input
- * n8n workflow expects: { inputType, content/url }
- * Returns: { summary, key_insights, actionable_takeaways, topics, sentiment }
+ * Triggers the ingestion webhook to process raw input
+ * 
+ * Sends content to n8n for extraction and analysis. The workflow processes
+ * various input types (text, URLs, YouTube videos) and returns structured data.
+ * 
+ * Expected payload format:
+ * - { inputType: "text", content: "..." }
+ * - { inputType: "url", url: "https://..." }
+ * - { inputType: "youtube", url: "https://youtube.com/..." }
+ * 
+ * Expected response from n8n:
+ * - { summary, key_insights, actionable_takeaways, topics, sentiment }
+ * 
+ * @param payload - Input data with type and content/URL
+ * @returns Result object with success status and optional data
  */
-export async function triggerIngest(payload: Record<string, string>): Promise<{
-    success: boolean;
-    error?: string;
-    data?: N8nResponse;
-}> {
+export async function triggerIngest(payload: Record<string, string>): Promise<WebhookResult> {
     console.log("Triggering ingest webhook");
-    const webhookUrl = await getWebhookUrl("ingest");
+    const webhookUrl = await getWebhookUrl(WEBHOOK_NAMES.INGEST);
 
     if (!webhookUrl) {
         return {
@@ -59,9 +65,9 @@ export async function triggerIngest(payload: Record<string, string>): Promise<{
     try {
         console.log("Sending to n8n:", webhookUrl, payload);
 
-        // Use AbortController for timeout (90 seconds for n8n processing)
+        // Use AbortController for timeout management
         const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 90000);
+        const timeoutId = setTimeout(() => controller.abort(), WEBHOOK_TIMEOUT_MS);
 
         const response = await fetch(webhookUrl, {
             method: "POST",
@@ -82,7 +88,7 @@ export async function triggerIngest(payload: Record<string, string>): Promise<{
             throw new Error(`Webhook returned ${response.status}: ${errorText}`);
         }
 
-        // Try to parse JSON - handle empty or non-JSON responses gracefully
+        // Parse response - handle empty or async responses gracefully
         const responseText = await response.text();
         console.log("n8n raw response:", responseText);
 
@@ -91,6 +97,7 @@ export async function triggerIngest(payload: Record<string, string>): Promise<{
             return { success: true };
         }
 
+        // Attempt JSON parsing
         let responseData: unknown;
         try {
             responseData = JSON.parse(responseText);
@@ -99,8 +106,7 @@ export async function triggerIngest(payload: Record<string, string>): Promise<{
             return { success: true }; // Treat as async
         }
 
-        // n8n returns: [{ "output": { summary, key_insights, ... } }]
-        // Unwrap the nested structure
+        // Unwrap nested n8n response structure: [{ "output": { ... } }]
         if (Array.isArray(responseData) && responseData.length > 0) {
             responseData = responseData[0];
         }
@@ -127,14 +133,21 @@ export async function triggerIngest(payload: Record<string, string>): Promise<{
     }
 }
 
+// ============================================================================
+// Format Workflow
+// ============================================================================
+
 /**
- * Trigger format webhook to generate social content
+ * Triggers the format webhook to generate social media content
+ * 
+ * Sends insight data to n8n for AI-powered content formatting.
+ * The workflow adapts the insight for specific platforms and tones.
+ * 
+ * @param payload - Insight data with platform and tone preferences
+ * @returns Result object with success status
  */
-export async function triggerFormat(payload: FormatPayload): Promise<{
-    success: boolean;
-    error?: string;
-}> {
-    const webhookUrl = await getWebhookUrl("format");
+export async function triggerFormat(payload: FormatPayload): Promise<WebhookResult> {
+    const webhookUrl = await getWebhookUrl(WEBHOOK_NAMES.FORMAT);
 
     if (!webhookUrl) {
         return {
@@ -143,6 +156,7 @@ export async function triggerFormat(payload: FormatPayload): Promise<{
         };
     }
 
+    // Update insight status to indicate formatting in progress
     await prisma.insight.update({
         where: { id: payload.insightId },
         data: { status: "formatting" },
@@ -162,10 +176,13 @@ export async function triggerFormat(payload: FormatPayload): Promise<{
         return { success: true };
     } catch (error) {
         console.error("Format webhook error:", error);
+
+        // Revert status on failure
         await prisma.insight.update({
             where: { id: payload.insightId },
             data: { status: "draft" },
         });
+
         return {
             success: false,
             error: error instanceof Error ? error.message : "Failed to trigger format"
@@ -173,14 +190,18 @@ export async function triggerFormat(payload: FormatPayload): Promise<{
     }
 }
 
+// ============================================================================
+// Publish Workflow
+// ============================================================================
+
 /**
- * Trigger publish webhook to post to social platforms
+ * Triggers the publish webhook to post content to social platforms
+ * 
+ * @param payload - Formatted content and platform information
+ * @returns Result object with success status
  */
-export async function triggerPublish(payload: PublishPayload): Promise<{
-    success: boolean;
-    error?: string;
-}> {
-    const webhookUrl = await getWebhookUrl("publish");
+export async function triggerPublish(payload: PublishPayload): Promise<WebhookResult> {
+    const webhookUrl = await getWebhookUrl(WEBHOOK_NAMES.PUBLISH);
 
     if (!webhookUrl) {
         return {
@@ -210,17 +231,20 @@ export async function triggerPublish(payload: PublishPayload): Promise<{
     }
 }
 
+// ============================================================================
+// Generate Workflow
+// ============================================================================
+
 /**
- * Trigger AI generation webhook with selected signals
+ * Triggers AI generation webhook with selected signals
+ * 
+ * Sends signals to n8n for AI-powered insight synthesis.
+ * 
+ * @param signals - Array of signal objects to analyze
+ * @returns Result object with success status
  */
-/**
- * Trigger AI generation webhook with selected signals
- */
-export async function triggerGenerate(signals: any[]): Promise<{
-    success: boolean;
-    error?: string;
-}> {
-    const webhookUrl = await getWebhookUrl("generate");
+export async function triggerGenerate(signals: unknown[]): Promise<WebhookResult> {
+    const webhookUrl = await getWebhookUrl(WEBHOOK_NAMES.GENERATE);
 
     if (!webhookUrl) {
         return {
@@ -250,14 +274,21 @@ export async function triggerGenerate(signals: any[]): Promise<{
     }
 }
 
+// ============================================================================
+// Cluster Workflow
+// ============================================================================
+
 /**
- * Trigger cluster webhook to group signals into insights
+ * Triggers cluster webhook to group signals into insights
+ * 
+ * Sends reviewed signals to n8n for AI-powered thematic clustering.
+ * The workflow identifies patterns and creates insight drafts.
+ * 
+ * @param signals - Array of signal objects to cluster
+ * @returns Result object with success status
  */
-export async function triggerCluster(signals: any[]): Promise<{
-    success: boolean;
-    error?: string;
-}> {
-    const webhookUrl = await getWebhookUrl("cluster");
+export async function triggerCluster(signals: unknown[]): Promise<WebhookResult> {
+    const webhookUrl = await getWebhookUrl(WEBHOOK_NAMES.CLUSTER);
 
     if (!webhookUrl) {
         return {
@@ -287,4 +318,5 @@ export async function triggerCluster(signals: any[]): Promise<{
     }
 }
 
+// Re-export types for convenience
 export type { FormatPayload, PublishPayload };
