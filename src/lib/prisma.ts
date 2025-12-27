@@ -16,6 +16,9 @@ const globalForPrisma = globalThis as unknown as {
 
 const createPrismaClient = () => {
     const connectionString = process.env.DATABASE_URL;
+    if (!connectionString) {
+        console.error("ERROR: DATABASE_URL is not defined in the environment functions.");
+    }
     const pool = new Pool({ connectionString });
     const adapter = new PrismaPg(pool);
     return new PrismaClient({ adapter });
