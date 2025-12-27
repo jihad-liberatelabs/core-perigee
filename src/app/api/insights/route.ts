@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
-import { triggerFormat, triggerPublish } from "@/lib/webhooks";
+import { triggerPublish } from "@/lib/webhooks";
 
 /**
  * GET /api/insights
@@ -61,6 +61,8 @@ export async function POST(request: NextRequest) {
         const insight = await prisma.insight.create({
             data: {
                 coreInsight: body.coreInsight,
+                preview: body.preview || body.coreInsight, // Default preview to coreInsight if not provided
+                previewPlatform: body.previewPlatform || "linkedin",
                 status: "draft",
                 // Link thoughts if provided
                 thoughts: body.thoughtIds?.length ? {
@@ -114,49 +116,6 @@ export async function PATCH(request: NextRequest) {
             );
         }
 
-        // Handle format action
-        if (body.action === "format") {
-            const insight = await prisma.insight.findUnique({
-                where: { id: body.id },
-                include: {
-                    thoughts: true,
-                    signals: true, // Fetch full signal content
-                },
-            });
-
-            if (!insight) {
-                return NextResponse.json(
-                    { error: "Insight not found" },
-                    { status: 404 }
-                );
-            }
-
-            // Combine context from thoughts and signals
-            const context = [
-                ...insight.thoughts.map(t => t.content),
-                ...insight.signals.map(s => `[Signal: ${s.title}] ${s.content}`)
-            ];
-
-            const result = await triggerFormat({
-                insightId: insight.id,
-                coreInsight: insight.coreInsight,
-                context: context,
-                platform: body.platform ?? "linkedin",
-                tone: body.tone,
-            });
-
-            if (!result.success) {
-                return NextResponse.json(
-                    { error: result.error },
-                    { status: 502 }
-                );
-            }
-
-            return NextResponse.json({
-                success: true,
-                message: "Format request sent to n8n",
-            });
-        }
 
         // Handle publish action
         if (body.action === "publish") {
@@ -164,17 +123,17 @@ export async function PATCH(request: NextRequest) {
                 where: { id: body.id },
             });
 
-            if (!insight || !insight.preview) {
+            if (!insight || (!insight.preview && !insight.coreInsight)) {
                 return NextResponse.json(
-                    { error: "Insight must have a preview before publishing" },
+                    { error: "Insight must have content before publishing" },
                     { status: 400 }
                 );
             }
 
             const result = await triggerPublish({
                 insightId: insight.id,
-                formattedContent: insight.preview,
-                platform: insight.previewPlatform ?? "linkedin",
+                formattedContent: insight.preview || insight.coreInsight,
+                platform: insight.previewPlatform || "linkedin",
             });
 
             if (!result.success) {

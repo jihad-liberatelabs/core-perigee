@@ -15,7 +15,11 @@ export default function AppHeader() {
     /**
      * Checks if the given path matches the current pathname
      */
-    const isActive = (path: string) => pathname === path;
+    const isActive = (path: string) => {
+        if (path === "/") return pathname === "/" || pathname === "/capture";
+        if (path === "/queue") return pathname === "/queue";
+        return pathname === path;
+    };
 
     return (
         <header
@@ -35,11 +39,11 @@ export default function AppHeader() {
 
                 {/* Navigation */}
                 <nav className="flex items-center gap-1">
-                    <NavLink href="/" active={isActive("/")}>
-                        Inbox
+                    <NavLink href="/capture" active={isActive("/")}>
+                        Capture
                     </NavLink>
                     <NavLink href="/queue" active={isActive("/queue")}>
-                        Queue
+                        Review
                     </NavLink>
                     <NavLink href="/insights" active={isActive("/insights")}>
                         Insights

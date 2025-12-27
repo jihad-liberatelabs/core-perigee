@@ -1,5 +1,5 @@
-import SignalInbox from "@/components/SignalInbox";
+import { redirect } from "next/navigation";
 
 export default function HomePage() {
-  return <SignalInbox />;
+  redirect("/capture");
 }

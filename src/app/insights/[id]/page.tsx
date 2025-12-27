@@ -3,6 +3,8 @@
 import { useState, useEffect, useCallback } from "react";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 
 interface Thought {
     id: string;
@@ -21,19 +23,18 @@ interface Insight {
     thoughts: Thought[];
 }
 
+
 export default function InsightEditorPage() {
     const params = useParams();
     const router = useRouter();
-    const searchParams = useSearchParams();
     const insightId = params.id as string;
-    const action = searchParams.get("action");
 
     const [insight, setInsight] = useState<Insight | null>(null);
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
-    const [coreInsight, setCoreInsight] = useState("");
-    const [platform, setPlatform] = useState("linkedin");
-    const [tone, setTone] = useState<"analytical" | "reflective" | "decisive">("reflective");
+    const [draftContent, setDraftContent] = useState("");
+    const [mode, setMode] = useState<"edit" | "preview">("preview");
+    const [isExpanded, setIsExpanded] = useState(false);
     const [actionLoading, setActionLoading] = useState(false);
     const [actionError, setActionError] = useState<string | null>(null);
 
@@ -47,7 +48,8 @@ export default function InsightEditorPage() {
                 return;
             }
             setInsight(found);
-            setCoreInsight(found.coreInsight);
+            // Default to preview content if it exists, otherwise core insight
+            setDraftContent(found.preview || found.coreInsight || "");
         } catch (error) {
             console.error("Failed to fetch insight:", error);
             router.push("/insights");
@@ -60,8 +62,8 @@ export default function InsightEditorPage() {
         fetchInsight();
     }, [fetchInsight]);
 
-    async function saveInsight() {
-        if (!coreInsight.trim()) return;
+    async function saveDraft() {
+        if (!draftContent.trim()) return;
 
         setSaving(true);
         try {
@@ -70,69 +72,25 @@ export default function InsightEditorPage() {
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
                     id: insightId,
-                    coreInsight: coreInsight.trim(),
+                    preview: draftContent, // Saving to preview field as it is the draft
                 }),
             });
-            fetchInsight();
+            // Update local state to reflect saved status if needed
         } catch (error) {
-            console.error("Failed to save insight:", error);
+            console.error("Failed to save draft:", error);
         } finally {
             setSaving(false);
         }
     }
 
-    async function triggerFormat() {
-        setActionLoading(true);
-        setActionError(null);
-
-        try {
-            const res = await fetch("/api/insights", {
-                method: "PATCH",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                    id: insightId,
-                    action: "format",
-                    platform,
-                    tone,
-                }),
-            });
-
-            const data = await res.json();
-            if (!res.ok) {
-                throw new Error(data.error || "Failed to trigger format");
-            }
-
-            // Start polling for preview update
-            pollForPreview();
-        } catch (error) {
-            setActionError(error instanceof Error ? error.message : "Failed to format");
-            setActionLoading(false);
-        }
-    }
-
-    async function pollForPreview() {
-        // Poll every 2 seconds for up to 60 seconds
-        let attempts = 0;
-        const maxAttempts = 30;
-
-        const poll = async () => {
-            attempts++;
-            await fetchInsight();
-
-            if (insight?.status === "previewing" || attempts >= maxAttempts) {
-                setActionLoading(false);
-                return;
-            }
-
-            setTimeout(poll, 2000);
-        };
-
-        setTimeout(poll, 2000);
-    }
-
     async function triggerPublish() {
+        if (!confirm("Are you ready to publish this post to LinkedIn?")) return;
+
         setActionLoading(true);
         setActionError(null);
+
+        // Save first to ensure latest content is published
+        await saveDraft();
 
         try {
             const res = await fetch("/api/insights", {
@@ -172,10 +130,7 @@ export default function InsightEditorPage() {
 
     if (loading) {
         return (
-            <div
-                className="min-h-screen flex items-center justify-center"
-                style={{ background: "var(--background)" }}
-            >
+            <div className="min-h-screen flex items-center justify-center" style={{ background: "var(--background)" }}>
                 <div className="skeleton w-16 h-16 rounded-full" />
             </div>
         );
@@ -184,289 +139,182 @@ export default function InsightEditorPage() {
     if (!insight) return null;
 
     return (
-        <div className="min-h-screen" style={{ background: "var(--background)" }}>
+        <div className="min-h-screen flex flex-col" style={{ background: "var(--background)" }}>
             {/* Header */}
             <header
-                className="sticky top-0 z-10 border-b px-8 py-4"
+                className="sticky top-0 z-10 border-b px-6 py-4"
                 style={{
                     background: "var(--background)",
                     borderColor: "var(--border)",
                 }}
             >
-                <div className="max-w-4xl mx-auto flex items-center justify-between">
-                    <Link href="/insights" className="btn btn-ghost">
-                        ← Back to Insights
-                    </Link>
+                <div className="max-w-5xl mx-auto flex items-center justify-between">
+                    <div className="flex items-center gap-4">
+                        <Link href="/insights" className="btn btn-ghost px-2">
+                            ← Back
+                        </Link>
+                        <div className="h-6 w-px bg-[var(--border)]" />
+
+                        <div className="flex-1">
+                            <span className="text-sm text-[var(--text-secondary)]">Editing Insight</span>
+                            <div className="flex items-center gap-2">
+                                <span
+                                    className="w-2 h-2 rounded-full"
+                                    style={{
+                                        background: insight.status === "published" ? "var(--success)" : "var(--warning)"
+                                    }}
+                                />
+                                <span className="text-sm font-medium capitalize" style={{ color: "var(--text-primary)" }}>
+                                    {insight.status}
+                                </span>
+                            </div>
+                        </div>
+                    </div>
+
                     <div className="flex items-center gap-3">
-                        <span
-                            className="px-3 py-1 rounded-full text-xs font-medium capitalize"
-                            style={{
-                                background: insight.status === "published"
-                                    ? "var(--success-soft)"
-                                    : "var(--warning-soft)",
-                                color: insight.status === "published"
-                                    ? "var(--success)"
-                                    : "var(--warning)",
-                            }}
-                        >
-                            {insight.status}
-                        </span>
-                        {insight.publishedUrl && (
+                        {insight.publishedUrl ? (
                             <a
                                 href={insight.publishedUrl}
                                 target="_blank"
                                 rel="noopener noreferrer"
                                 className="btn btn-secondary text-sm"
                             >
-                                View Post ↗
+                                View Live Post ↗
                             </a>
+                        ) : (
+                            <button
+                                onClick={triggerPublish}
+                                disabled={actionLoading}
+                                className="btn btn-primary"
+                                style={{ opacity: actionLoading ? 0.6 : 1 }}
+                            >
+                                {actionLoading ? "Publishing..." : "Publish Now"}
+                            </button>
                         )}
                     </div>
                 </div>
             </header>
 
             {/* Main Content */}
-            <main className="max-w-4xl mx-auto px-8 py-8">
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-                    {/* Left: Editor */}
-                    <div>
-                        <h2
-                            className="text-lg font-medium mb-4"
-                            style={{ color: "var(--text-primary)" }}
-                        >
-                            Core Insight
-                        </h2>
-
-                        <textarea
-                            value={coreInsight}
-                            onChange={(e) => setCoreInsight(e.target.value)}
-                            className="textarea text-lg"
-                            rows={6}
-                            placeholder="Your singular, opinionated insight..."
-                        />
-
+            <main className="flex-1 max-w-3xl mx-auto w-full px-6 py-8">
+                {/* Editor / Preview Toggle */}
+                <div className="flex items-center justify-between mb-6">
+                    <div className="flex p-1 rounded-lg bg-[var(--background-elevated)] border border-[var(--border)]">
                         <button
-                            onClick={saveInsight}
-                            disabled={saving || coreInsight === insight.coreInsight}
-                            className="btn btn-secondary mt-4"
-                            style={{ opacity: saving || coreInsight === insight.coreInsight ? 0.6 : 1 }}
+                            onClick={() => setMode("preview")}
+                            className={`px-4 py-1.5 text-sm font-medium rounded-md transition-all ${mode === "preview"
+                                ? "bg-[var(--background-active)] text-[var(--text-primary)] shadow-sm"
+                                : "text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
+                                }`}
                         >
-                            {saving ? "Saving..." : "Save Changes"}
+                            Preview Card
                         </button>
-
-                        {/* Linked Thoughts */}
-                        <div className="mt-8">
-                            <h3
-                                className="text-sm font-medium mb-3"
-                                style={{ color: "var(--text-secondary)" }}
-                            >
-                                Linked Thoughts ({insight.thoughts.length})
-                            </h3>
-
-                            {insight.thoughts.length === 0 ? (
-                                <p
-                                    className="text-sm italic"
-                                    style={{ color: "var(--text-muted)" }}
-                                >
-                                    No thoughts linked to this insight
-                                </p>
-                            ) : (
-                                <div className="space-y-3">
-                                    {insight.thoughts.map((thought) => (
-                                        <div
-                                            key={thought.id}
-                                            className="p-3 rounded-lg"
-                                            style={{
-                                                background: "var(--background-elevated)",
-                                                border: "1px solid var(--border)",
-                                            }}
-                                        >
-                                            <p
-                                                className="text-sm"
-                                                style={{ color: "var(--text-primary)" }}
-                                            >
-                                                {thought.content}
-                                            </p>
-                                            {thought.signal && (
-                                                <p
-                                                    className="text-xs mt-2"
-                                                    style={{ color: "var(--text-muted)" }}
-                                                >
-                                                    From: {thought.signal.title}
-                                                </p>
-                                            )}
-                                        </div>
-                                    ))}
-                                </div>
-                            )}
-                        </div>
+                        <button
+                            onClick={() => setMode("edit")}
+                            className={`px-4 py-1.5 text-sm font-medium rounded-md transition-all ${mode === "edit"
+                                ? "bg-[var(--background-active)] text-[var(--text-primary)] shadow-sm"
+                                : "text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
+                                }`}
+                        >
+                            Edit Copy
+                        </button>
                     </div>
 
-                    {/* Right: Actions & Preview */}
-                    <div>
-                        {/* Format Section */}
-                        {(insight.status === "draft" || action === "format") && (
-                            <div
-                                className="p-6 rounded-xl mb-6"
-                                style={{
-                                    background: "var(--background-elevated)",
-                                    border: "1px solid var(--border)",
-                                }}
-                            >
-                                <h3
-                                    className="text-lg font-medium mb-4"
-                                    style={{ color: "var(--text-primary)" }}
-                                >
-                                    Format for Publishing
-                                </h3>
-
-                                <div className="space-y-4">
-                                    <div>
-                                        <label
-                                            className="block text-sm mb-2"
-                                            style={{ color: "var(--text-secondary)" }}
-                                        >
-                                            Platform
-                                        </label>
-                                        <select
-                                            value={platform}
-                                            onChange={(e) => setPlatform(e.target.value)}
-                                            className="input"
-                                        >
-                                            <option value="linkedin">LinkedIn</option>
-                                            <option value="twitter">X (Twitter)</option>
-                                        </select>
-                                    </div>
-
-                                    <div>
-                                        <label
-                                            className="block text-sm mb-2"
-                                            style={{ color: "var(--text-secondary)" }}
-                                        >
-                                            Tone
-                                        </label>
-                                        <select
-                                            value={tone}
-                                            onChange={(e) => setTone(e.target.value as typeof tone)}
-                                            className="input"
-                                        >
-                                            <option value="analytical">Analytical</option>
-                                            <option value="reflective">Reflective</option>
-                                            <option value="decisive">Decisive</option>
-                                        </select>
-                                    </div>
-
-                                    {actionError && (
-                                        <p
-                                            className="text-sm p-3 rounded-lg"
-                                            style={{
-                                                background: "var(--error-soft)",
-                                                color: "var(--error)",
-                                            }}
-                                        >
-                                            {actionError}
-                                        </p>
-                                    )}
-
-                                    <button
-                                        onClick={triggerFormat}
-                                        disabled={actionLoading}
-                                        className="btn btn-primary w-full"
-                                        style={{ opacity: actionLoading ? 0.6 : 1 }}
-                                    >
-                                        {actionLoading ? "Formatting..." : "Send to n8n for Formatting"}
-                                    </button>
-
-                                    <p
-                                        className="text-xs text-center"
-                                        style={{ color: "var(--text-muted)" }}
-                                    >
-                                        n8n will generate a formatted post and send it back
-                                    </p>
-                                </div>
-                            </div>
-                        )}
-
-                        {/* Preview Section */}
-                        {(insight.preview || insight.status === "previewing" || action === "publish") && (
-                            <div
-                                className="p-6 rounded-xl"
-                                style={{
-                                    background: "var(--background-elevated)",
-                                    border: "1px solid var(--border)",
-                                }}
-                            >
-                                <h3
-                                    className="text-lg font-medium mb-4"
-                                    style={{ color: "var(--text-primary)" }}
-                                >
-                                    Preview ({insight.previewPlatform || platform})
-                                </h3>
-
-                                {insight.preview ? (
-                                    <>
-                                        <div
-                                            className="p-4 rounded-lg mb-4"
-                                            style={{
-                                                background: "var(--background)",
-                                                border: "1px solid var(--border)",
-                                            }}
-                                        >
-                                            <p
-                                                className="text-sm whitespace-pre-wrap"
-                                                style={{ color: "var(--text-primary)" }}
-                                            >
-                                                {insight.preview}
-                                            </p>
-                                        </div>
-
-                                        {insight.status !== "published" && (
-                                            <>
-                                                {actionError && (
-                                                    <p
-                                                        className="text-sm p-3 rounded-lg mb-4"
-                                                        style={{
-                                                            background: "var(--error-soft)",
-                                                            color: "var(--error)",
-                                                        }}
-                                                    >
-                                                        {actionError}
-                                                    </p>
-                                                )}
-
-                                                <div className="flex gap-3">
-                                                    <button
-                                                        onClick={triggerPublish}
-                                                        disabled={actionLoading}
-                                                        className="btn btn-primary flex-1"
-                                                        style={{ opacity: actionLoading ? 0.6 : 1 }}
-                                                    >
-                                                        {actionLoading ? "Publishing..." : "Publish"}
-                                                    </button>
-                                                    <button
-                                                        onClick={triggerFormat}
-                                                        disabled={actionLoading}
-                                                        className="btn btn-secondary"
-                                                    >
-                                                        Regenerate
-                                                    </button>
-                                                </div>
-                                            </>
-                                        )}
-                                    </>
-                                ) : (
-                                    <p
-                                        className="text-sm italic"
-                                        style={{ color: "var(--text-muted)" }}
-                                    >
-                                        Waiting for preview from n8n...
-                                    </p>
-                                )}
-                            </div>
-                        )}
-                    </div>
+                    {mode === "edit" && (
+                        <span className="text-xs text-[var(--text-muted)] animate-fadeIn">
+                            {saving ? "Saving..." : "Changes save automatically"}
+                        </span>
+                    )}
                 </div>
+
+                {/* Editor Area */}
+                <div className="relative min-h-[400px]">
+                    {mode === "edit" ? (
+                        <div className="animate-fadeIn">
+                            <textarea
+                                value={draftContent}
+                                onChange={(e) => {
+                                    setDraftContent(e.target.value);
+                                    // Debounce save if needed, for now explicit save on blur or interval could work, 
+                                    // but let's just use manual save or rely on the publish/save buttons.
+                                    // Actually, let's auto-save on blur or use a timer? 
+                                    // The user asked to "edit the copy". 
+                                    // I'll add a manual save button next to the textbox if preferred, or just rely on the 'Save Draft' logic implicitly.
+                                    // Let's rely on blur to save.
+                                }}
+                                onBlur={saveDraft}
+                                className="w-full h-[500px] p-6 text-lg leading-relaxed bg-[var(--background)] border border-[var(--border)] rounded-xl focus:ring-2 focus:ring-[var(--accent)] focus:outline-none resize-none font-sans"
+                                placeholder="Draft your post here..."
+                                style={{ color: "var(--text-primary)" }}
+                            />
+                            <p className="text-xs text-[var(--text-muted)] mt-2 text-right">Markdown supported</p>
+                        </div>
+                    ) : (
+                        <div className="animate-fadeIn flex justify-center">
+                            {/* LinkedIn Preview Card */}
+                            <div
+                                className="w-full max-w-[552px] rounded-xl overflow-hidden border shadow-sm"
+                                style={{
+                                    background: "white",
+                                    borderColor: "#e0e0e0",
+                                    color: "#191919",
+                                    fontFamily: '-apple-system, system-ui, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif'
+                                }}
+                            >
+                                <div className="p-4 flex gap-3 border-b border-gray-100 bg-gray-50/50">
+                                    <div className="w-12 h-12 rounded-full bg-gradient-to-br from-blue-400 to-indigo-600 flex items-center justify-center text-white font-bold text-xl ring-2 ring-white">
+                                        P
+                                    </div>
+                                    <div className="flex-1">
+                                        <div className="h-4 w-32 bg-gray-300 rounded mb-1.5"></div>
+                                        <div className="h-3 w-48 bg-gray-200 rounded"></div>
+                                    </div>
+                                </div>
+
+                                <div className="p-5">
+                                    <div className="prose prose-sm max-w-none text-[15px] leading-relaxed text-[#191919]">
+                                        <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                                            {isExpanded || draftContent.length <= 160
+                                                ? draftContent || "(No content yet)"
+                                                : draftContent.substring(0, 160)}
+                                        </ReactMarkdown>
+                                        {!isExpanded && draftContent.length > 160 && (
+                                            <span
+                                                onClick={() => setIsExpanded(true)}
+                                                className="text-[#666666] font-semibold cursor-pointer hover:underline hover:text-[#0a66c2]"
+                                            >
+                                                ...see more
+                                            </span>
+                                        )}
+                                        {isExpanded && draftContent.length > 160 && (
+                                            <button
+                                                onClick={() => setIsExpanded(false)}
+                                                className="text-xs text-[#666666] font-semibold hover:underline mt-2 block"
+                                            >
+                                                Show less
+                                            </button>
+                                        )}
+                                    </div>
+                                </div>
+
+                                <div className="px-5 py-3 border-t border-gray-100 flex items-center gap-6 text-gray-500 font-semibold text-sm">
+                                    <span className="flex items-center gap-1.5">Like</span>
+                                    <span className="flex items-center gap-1.5">Comment</span>
+                                    <span className="flex items-center gap-1.5">Share</span>
+                                    <span className="flex items-center gap-1.5">Send</span>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+                </div>
+
+                {actionError && (
+                    <div className="mt-4 p-4 rounded-lg bg-[var(--error-soft)] text-[var(--error)] text-sm">
+                        {actionError}
+                    </div>
+                )}
             </main>
         </div>
     );
 }
+

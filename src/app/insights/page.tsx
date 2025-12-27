@@ -3,6 +3,8 @@
 import { useState } from "react";
 import Link from "next/link";
 import useSWR from "swr";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import AppHeader from "@/components/AppHeader";
 
 interface Thought {
@@ -28,8 +30,6 @@ const fetcher = (url: string) => fetch(url).then((res) => res.json());
 
 export default function InsightsPage() {
     const [filter, setFilter] = useState("all");
-    const [editingPreviewId, setEditingPreviewId] = useState<string | null>(null);
-    const [editedPreviewContent, setEditedPreviewContent] = useState("");
 
     // Polling setup
     const params = new URLSearchParams();
@@ -79,49 +79,10 @@ export default function InsightsPage() {
         }
     }
 
-    async function updatePreview(id: string) {
-        if (!editedPreviewContent.trim()) return;
+    async function deleteInsight(e: React.MouseEvent, id: string) {
+        e.stopPropagation();
+        e.preventDefault();
 
-        try {
-            // Optimistic update
-            const updatedInsights = insights.map(i =>
-                i.id === id ? { ...i, preview: editedPreviewContent } : i
-            );
-            mutateInsights({ insights: updatedInsights }, false);
-
-            await fetch("/api/insights", {
-                method: "PATCH",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                    id,
-                    coreInsight: insights.find(i => i.id === id)?.coreInsight, // Keep existing
-                    preview: editedPreviewContent // We need to add this field to API handler if not present, but for now assuming we update the core object or create a specific endpoint
-                    // Wait, PATCH /api/insights current implementation only updates 'coreInsight'.
-                    // I need to update the API to allow updating 'preview' field manually.
-                }),
-            });
-
-            // Actually, I need to check the API implementation.
-            // ... API check revealed PATCH currently only updates coreInsight or triggers actions.
-            // I will need to update the API to support updating 'preview' field.
-            // For now, I'll assume I'll fix the API in the next step.
-
-            setEditingPreviewId(null);
-            mutateInsights();
-        } catch (error) {
-            console.error("Failed to update preview:", error);
-        }
-    }
-
-    // Temporary helper until I fix the API
-    async function savePreviewEdit(id: string) {
-        // Implementation pending API update
-        console.log("Saving preview", id, editedPreviewContent);
-        // Fallback for now: just close edit mode
-        setEditingPreviewId(null);
-    }
-
-    async function deleteInsight(id: string) {
         if (!confirm("Delete this insight?")) return;
 
         try {
@@ -135,10 +96,28 @@ export default function InsightsPage() {
     function getStatusColor(status: string) {
         switch (status) {
             case "draft": return "var(--warning)";
-            case "formatting": return "var(--accent)";
-            case "previewing": return "var(--accent)";
             case "published": return "var(--success)";
             default: return "var(--text-muted)";
+        }
+    }
+
+    async function publishInsight(id: string) {
+        if (!confirm("Publish this post to LinkedIn?")) return;
+
+        try {
+            const res = await fetch("/api/insights", {
+                method: "PATCH",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ id, action: "publish" }),
+            });
+
+            if (!res.ok) throw new Error("Failed to publish");
+
+            alert("Post sent for publication!");
+            mutateInsights();
+        } catch (error) {
+            console.error("Publish error:", error);
+            alert("Failed to publish: " + (error instanceof Error ? error.message : "Unknown error"));
         }
     }
 
@@ -147,7 +126,7 @@ export default function InsightsPage() {
             <AppHeader />
 
             {/* Main Content */}
-            <main className="max-w-5xl mx-auto px-6 py-8">
+            <main className="max-w-7xl mx-auto px-6 py-8">
                 <div className="flex items-center justify-between mb-8">
                     <h1 className="text-3xl font-bold tracking-tight text-[var(--text-primary)]">
                         Insights
@@ -163,7 +142,7 @@ export default function InsightsPage() {
 
                 {/* Filter Tabs */}
                 <div className="flex gap-2 mb-8">
-                    {["all", "draft", "previewing", "published"].map((tab) => (
+                    {["all", "draft", "published"].map((tab) => (
                         <button
                             key={tab}
                             onClick={() => setFilter(tab)}
@@ -179,13 +158,13 @@ export default function InsightsPage() {
                     ))}
                 </div>
 
-                {/* List Content */}
+                {/* Grid Content */}
                 {!insightsData ? (
-                    <div className="space-y-4">
-                        {[1, 2, 3].map((i) => (
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                        {[1, 2, 3, 4, 5, 6].map((i) => (
                             <div
                                 key={i}
-                                className="skeleton h-24 rounded-lg"
+                                className="skeleton h-64 rounded-xl"
                                 style={{ background: "var(--background-elevated)" }}
                             />
                         ))}
@@ -199,131 +178,82 @@ export default function InsightsPage() {
                         <p className="text-sm mt-1">Create insights from your thoughts and reflections</p>
                     </div>
                 ) : (
-                    <div className="space-y-6">
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                         {insights.map((insight) => (
-                            <article
+                            <Link
+                                href={`/insights/${insight.id}`}
                                 key={insight.id}
-                                className="card animate-fadeIn"
+                                className="card group hover:scale-[1.02] active:scale-[0.98] transition-all duration-200 flex flex-col h-full cursor-pointer relative"
                                 style={{
                                     background: "var(--background-elevated)",
                                     borderColor: "var(--border)",
                                 }}
                             >
-                                <div className="flex items-start justify-between gap-4 mb-4">
-                                    <p className="text-lg font-medium flex-1" style={{ color: "var(--text-primary)" }}>
-                                        {insight.coreInsight}
-                                    </p>
+                                {/* Card Header */}
+                                <div className="flex items-start justify-between mb-4">
                                     <span
-                                        className="px-3 py-1 rounded-full text-xs font-medium capitalize"
+                                        className="px-2.5 py-0.5 rounded-full text-[11px] font-semibold uppercase tracking-wider"
                                         style={{
-                                            background: `${getStatusColor(insight.status)}20`,
+                                            background: `${getStatusColor(insight.status)}15`,
                                             color: getStatusColor(insight.status),
+                                            border: `1px solid ${getStatusColor(insight.status)}30`
                                         }}
                                     >
                                         {insight.status}
                                     </span>
+                                    <span className="text-xs text-[var(--text-muted)]">
+                                        {new Date(insight.createdAt).toLocaleDateString()}
+                                    </span>
                                 </div>
 
-                                {/* Linked Sources */}
-                                {(insight.signals?.length > 0 || insight.thoughts?.length > 0) && (
-                                    <div className="mb-4">
-                                        <p className="text-xs mb-2" style={{ color: "var(--text-muted)" }}>
-                                            Based on {insight.signals?.length > 0 ? `${insight.signals.length} signal${insight.signals.length > 1 ? "s" : ""}` : `${insight.thoughts.length} thought${insight.thoughts.length > 1 ? "s" : ""}`}
-                                        </p>
-                                        <div className="flex flex-wrap gap-2">
-                                            {insight.signals?.length > 0 ? (
-                                                <>
-                                                    {insight.signals.slice(0, 3).map((signal) => (
-                                                        <span key={signal.id} className="px-2 py-1 rounded text-xs truncate max-w-48 flex items-center gap-1" style={{ background: "var(--background-hover)", color: "var(--text-secondary)", border: "1px solid var(--border)" }}>
-                                                            <svg className="w-3 h-3 opacity-50" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>
-                                                            {signal.title}
-                                                        </span>
-                                                    ))}
-                                                    {insight.signals.length > 3 && <span className="px-2 py-1 text-xs" style={{ color: "var(--text-muted)" }}>+{insight.signals.length - 3} more</span>}
-                                                </>
-                                            ) : (
-                                                <>
-                                                    {insight.thoughts.slice(0, 3).map((thought) => (
-                                                        <span key={thought.id} className="px-2 py-1 rounded text-xs truncate max-w-48" style={{ background: "var(--background-hover)", color: "var(--text-secondary)" }}>
-                                                            {thought.content.substring(0, 50)}...
-                                                        </span>
-                                                    ))}
-                                                    {insight.thoughts.length > 3 && <span className="px-2 py-1 text-xs" style={{ color: "var(--text-muted)" }}>+{insight.thoughts.length - 3} more</span>}
-                                                </>
-                                            )}
-                                        </div>
-                                    </div>
-                                )}
-
-                                {/* Preview / LinkedIn Style Card */}
-                                {insight.preview && (
-                                    <div className="mt-6 mb-6">
-                                        <div className="flex items-center justify-between mb-2">
-                                            <p className="text-xs" style={{ color: "var(--text-muted)" }}>Preview ({insight.previewPlatform || "LinkedIn"})</p>
-                                            {insight.status !== "published" && (
-                                                <button
-                                                    onClick={() => {
-                                                        if (editingPreviewId === insight.id) {
-                                                            updatePreview(insight.id);
-                                                        } else {
-                                                            setEditingPreviewId(insight.id);
-                                                            setEditedPreviewContent(insight.preview || "");
-                                                        }
-                                                    }}
-                                                    className="text-xs hover:underline"
-                                                    style={{ color: "var(--accent)" }}
-                                                >
-                                                    {editingPreviewId === insight.id ? "Save Changes" : "Edit Preview"}
-                                                </button>
-                                            )}
-                                        </div>
-                                        <div className="rounded-lg overflow-hidden border" style={{ background: "white", borderColor: "#e0e0e0", color: "black", fontFamily: '-apple-system, system-ui, BlinkMacSystemFont, "Segoe UI", Roboto' }}>
-                                            <div className="p-3 flex gap-2 border-b border-gray-100">
-                                                <div className="w-10 h-10 rounded-full bg-gray-200"></div>
-                                                <div className="flex-1">
-                                                    <div className="h-3 w-32 bg-gray-200 rounded mb-1"></div>
-                                                    <div className="h-2 w-20 bg-gray-100 rounded"></div>
-                                                </div>
-                                            </div>
-                                            <div className="p-4 text-sm leading-relaxed whitespace-pre-wrap">
-                                                {editingPreviewId === insight.id ? (
-                                                    <textarea
-                                                        value={editedPreviewContent}
-                                                        onChange={(e) => setEditedPreviewContent(e.target.value)}
-                                                        className="w-full h-48 p-2 border rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
-                                                        style={{ background: "#f8f9fa" }}
-                                                    />
-                                                ) : (
-                                                    insight.preview
+                                {/* Content Preview */}
+                                <div className="flex-1 mb-4 overflow-hidden relative">
+                                    <div className="text-[15px] font-medium leading-relaxed prose prose-sm" style={{ color: "var(--text-primary)" }}>
+                                        {insight.preview ? (
+                                            <>
+                                                <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                                                    {insight.preview.length > 160
+                                                        ? insight.preview.substring(0, 160)
+                                                        : insight.preview}
+                                                </ReactMarkdown>
+                                                {insight.preview.length > 160 && (
+                                                    <span className="text-[var(--text-muted)] font-semibold">
+                                                        ...see more
+                                                    </span>
                                                 )}
-                                            </div>
-                                            <div className="px-4 py-2 border-t border-gray-100 flex justify-between text-gray-500 text-xs">
-                                                <span>Like</span><span>Comment</span><span>Share</span><span>Send</span>
-                                            </div>
+                                            </>
+                                        ) : (
+                                            <p className="line-clamp-4">{insight.coreInsight}</p>
+                                        )}
+                                    </div>
+                                    {!insight.preview && insight.status === "draft" && (
+                                        <div className="mt-2 text-xs italic text-[var(--text-muted)]">
+                                            Generating draft...
                                         </div>
-                                    </div>
-                                )}
-
-                                {/* Published Link */}
-                                {insight.publishedUrl && (
-                                    <div className="mb-4">
-                                        <a href={insight.publishedUrl} target="_blank" rel="noopener noreferrer" className="text-sm hover:underline" style={{ color: "var(--success)" }}>
-                                            View published post ↗
-                                        </a>
-                                    </div>
-                                )}
-
-                                {/* Actions */}
-                                <div className="flex items-center justify-between pt-4 border-t" style={{ borderColor: "var(--border-subtle)" }}>
-                                    <div className="flex gap-2">
-                                        <Link href={`/insights/${insight.id}`} className="btn btn-secondary text-sm">Edit Core Insight</Link>
-                                        {insight.status === "draft" && <Link href={`/insights/${insight.id}?action=format`} className="btn btn-primary text-sm">Format for Publishing</Link>}
-                                        {insight.status === "previewing" && <Link href={`/insights/${insight.id}?action=publish`} className="btn btn-primary text-sm">Publish Now</Link>}
-                                        {insight.status === "formatting" && <span className="text-sm italic opacity-70 flex items-center gap-2"><span className="loading loading-spinner loading-xs"></span>Formatting...</span>}
-                                    </div>
-                                    <button onClick={() => deleteInsight(insight.id)} className="btn btn-ghost text-sm" style={{ color: "var(--error)" }}>Delete</button>
+                                    )}
                                 </div>
-                            </article>
+
+                                {/* Footer Info */}
+                                <div className="flex items-center justify-between pt-4 border-t border-[var(--border)] mt-auto">
+                                    <div className="flex items-center gap-3 text-xs text-[var(--text-secondary)]">
+                                        {(insight.signals?.length > 0 || insight.thoughts?.length > 0) && (
+                                            <span className="flex items-center gap-1">
+                                                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z" />
+                                                </svg>
+                                                {insight.signals?.length || insight.thoughts?.length} sources
+                                            </span>
+                                        )}
+                                    </div>
+
+                                    <button
+                                        onClick={(e) => deleteInsight(e, insight.id)}
+                                        className="text-xs text-[var(--text-muted)] hover:text-[var(--error)] p-1 rounded hover:bg-[var(--background-hover)] transition-colors opacity-0 group-hover:opacity-100"
+                                    >
+                                        Delete
+                                    </button>
+                                </div>
+                            </Link>
                         ))}
                     </div>
                 )}

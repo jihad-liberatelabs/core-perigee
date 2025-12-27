@@ -9,7 +9,7 @@
 export const SIGNAL_STATUS = {
     UNREAD: "unread",
     REVIEWED: "reviewed",
-    CLUSTERED: "clustered",
+    PROCESSED: "processed",
     ARCHIVED: "archived",
 } as const;
 
@@ -21,8 +21,6 @@ export type SignalStatus = typeof SIGNAL_STATUS[keyof typeof SIGNAL_STATUS];
 
 export const INSIGHT_STATUS = {
     DRAFT: "draft",
-    FORMATTING: "formatting",
-    PREVIEWING: "previewing",
     PUBLISHED: "published",
 } as const;
 
@@ -37,9 +35,7 @@ export type InsightStatus = typeof INSIGHT_STATUS[keyof typeof INSIGHT_STATUS];
  */
 export const WEBHOOK_NAMES = {
     INGEST: "ingest",
-    CLUSTER: "cluster",
     GENERATE: "generate",
-    FORMAT: "format",
     PUBLISH: "publish",
 } as const;
 

@@ -11,6 +11,7 @@
  */
 export interface N8nResponse {
     summary?: string;
+    content?: string;
     key_insights?: string[];
     actionable_takeaways?: string[];
     topics?: string[];
@@ -18,6 +19,7 @@ export interface N8nResponse {
     source?: string;
     sourceUrl?: string;
     title?: string;
+    rawContent?: string;
 }
 
 /**
@@ -91,8 +93,10 @@ export interface SignalWithParsedTags {
     id: string;
     title: string;
     content: string;
+    summary: string | null;
     source: string | null;
     sourceUrl: string | null;
+    rawContent?: string | null;
     tags: string[];  // Parsed from JSON string
     status: string;
     createdAt: Date | string;

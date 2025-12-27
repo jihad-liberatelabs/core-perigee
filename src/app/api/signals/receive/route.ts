@@ -103,15 +103,19 @@ async function createSignalFromWebhook(data: N8nResponse) {
         || data.summary?.substring(0, TITLE_MAX_LENGTH)
         || "Extracted Insight";
 
-    const content = formatN8nDataToMarkdown(data);
+    // 'content' is the actual cleaned up content for display.
+    // Fall back to formatted markdown if data.content is missing.
+    const content = data.content || formatN8nDataToMarkdown(data);
     const tags = data.topics || [];
 
     return await prisma.signal.create({
         data: {
             title,
             content,
+            summary: data.summary,
             source: data.source || "n8n",
             sourceUrl: data.sourceUrl,
+            rawContent: data.rawContent,
             tags: JSON.stringify(tags),
             status: SIGNAL_STATUS.UNREAD,
         },

@@ -12,7 +12,9 @@ datasource db {
 model Signal {
   id          String      @id @default(cuid())
   title       String
-  content     String
+  content     String      // Processed content for display
+  summary     String?     // AI-generated summary
+  rawContent  String?     // Original unprocessed content (HTML, transcript, etc.)
   source      String?     // RSS, YouTube, PDF, Manual, etc.
   sourceUrl   String?
   tags        String      @default("[]") // JSON array stored as string for SQLite

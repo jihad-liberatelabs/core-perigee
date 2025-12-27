@@ -1,15 +1,13 @@
 import prisma from "./prisma";
 import { WEBHOOK_NAMES, WEBHOOK_TIMEOUT_MS } from "./constants";
-import type { FormatPayload, PublishPayload, WebhookResult, N8nResponse } from "./types";
+import type { PublishPayload, WebhookResult, N8nResponse } from "./types";
 
 /**
  * Webhook trigger utilities for outbound calls to n8n workflows
  * 
  * This module provides functions to trigger various n8n workflows:
  * - Ingest: Process raw input (URLs, text, YouTube)
- * - Cluster: Group related signals
  * - Generate: AI-powered insight generation
- * - Format: Social media content formatting
  * - Publish: Post content to platforms
  */
 
@@ -133,62 +131,6 @@ export async function triggerIngest(payload: Record<string, string>): Promise<We
     }
 }
 
-// ============================================================================
-// Format Workflow
-// ============================================================================
-
-/**
- * Triggers the format webhook to generate social media content
- * 
- * Sends insight data to n8n for AI-powered content formatting.
- * The workflow adapts the insight for specific platforms and tones.
- * 
- * @param payload - Insight data with platform and tone preferences
- * @returns Result object with success status
- */
-export async function triggerFormat(payload: FormatPayload): Promise<WebhookResult> {
-    const webhookUrl = await getWebhookUrl(WEBHOOK_NAMES.FORMAT);
-
-    if (!webhookUrl) {
-        return {
-            success: false,
-            error: "Format webhook URL not configured. Please set up in Settings."
-        };
-    }
-
-    // Update insight status to indicate formatting in progress
-    await prisma.insight.update({
-        where: { id: payload.insightId },
-        data: { status: "formatting" },
-    });
-
-    try {
-        const response = await fetch(webhookUrl, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(payload),
-        });
-
-        if (!response.ok) {
-            throw new Error(`Webhook returned ${response.status}`);
-        }
-
-        return { success: true };
-    } catch (error) {
-        console.error("Format webhook error:", error);
-
-        // Revert status on failure
-        await prisma.insight.update({
-            where: { id: payload.insightId },
-            data: { status: "draft" },
-        });
-
-        return {
-            success: false,
-            error: error instanceof Error ? error.message : "Failed to trigger format"
-        };
-    }
-}
 
 // ============================================================================
 // Publish Workflow
@@ -274,49 +216,5 @@ export async function triggerGenerate(signals: unknown[]): Promise<WebhookResult
     }
 }
 
-// ============================================================================
-// Cluster Workflow
-// ============================================================================
-
-/**
- * Triggers cluster webhook to group signals into insights
- * 
- * Sends reviewed signals to n8n for AI-powered thematic clustering.
- * The workflow identifies patterns and creates insight drafts.
- * 
- * @param signals - Array of signal objects to cluster
- * @returns Result object with success status
- */
-export async function triggerCluster(signals: unknown[]): Promise<WebhookResult> {
-    const webhookUrl = await getWebhookUrl(WEBHOOK_NAMES.CLUSTER);
-
-    if (!webhookUrl) {
-        return {
-            success: false,
-            error: "Cluster webhook URL not configured. Please set up in Settings."
-        };
-    }
-
-    try {
-        const response = await fetch(webhookUrl, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ signals }),
-        });
-
-        if (!response.ok) {
-            throw new Error(`Webhook returned ${response.status}`);
-        }
-
-        return { success: true };
-    } catch (error) {
-        console.error("Cluster webhook error:", error);
-        return {
-            success: false,
-            error: error instanceof Error ? error.message : "Failed to trigger clustering"
-        };
-    }
-}
-
 // Re-export types for convenience
-export type { FormatPayload, PublishPayload };
+export type { PublishPayload };

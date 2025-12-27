@@ -12,10 +12,8 @@ interface WebhookConfig {
 
 const WEBHOOK_DESCRIPTIONS: Record<string, string> = {
     ingest: "n8n webhook to process raw inputs (URLs, text) and extract signals",
-    generate: "n8n webhook to generate insights from selected signals",
-    cluster: "n8n webhook to auto-cluster reviewed signals into insights",
-    format: "n8n webhook to format insights into social media posts",
-    publish: "n8n webhook to publish formatted content to social platforms",
+    generate: "n8n webhook to generate LinkedIn posts from reviewed signals",
+    publish: "n8n webhook to publish posts to LinkedIn",
 };
 
 export default function SettingsPage() {
@@ -24,7 +22,7 @@ export default function SettingsPage() {
     const [saving, setSaving] = useState<string | null>(null);
     const [urls, setUrls] = useState<Record<string, string>>({
         ingest: "",
-        format: "",
+        generate: "",
         publish: "",
     });
 
@@ -47,7 +45,7 @@ export default function SettingsPage() {
             setConfigs(loadedConfigs);
 
             // Populate URLs from existing configs
-            const urlMap: Record<string, string> = { ingest: "", format: "", publish: "" };
+            const urlMap: Record<string, string> = { ingest: "", generate: "", publish: "" };
             loadedConfigs.forEach((c: WebhookConfig) => {
                 if (c.name in urlMap) {
                     urlMap[c.name] = c.url;
@@ -119,7 +117,7 @@ export default function SettingsPage() {
                         </div>
                     ) : (
                         <div className="space-y-6">
-                            {["ingest", "generate", "cluster", "format", "publish"].map((name) => {
+                            {["ingest", "generate", "publish"].map((name) => {
                                 const existingConfig = getConfigForName(name);
                                 const hasChanged = existingConfig?.url !== urls[name];
 
@@ -169,7 +167,7 @@ export default function SettingsPage() {
                                         <div className="flex gap-3">
                                             <input
                                                 type="url"
-                                                value={urls[name]}
+                                                value={urls[name] || ""}
                                                 onChange={(e) => setUrls({ ...urls, [name]: e.target.value })}
                                                 placeholder="https://your-n8n-instance.com/webhook/..."
                                                 className="input flex-1 font-mono text-sm"

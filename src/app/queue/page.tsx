@@ -2,8 +2,10 @@
 
 import { useState, useEffect, useRef } from "react";
 import useSWR from "swr";
-import Link from "next/link";
 import { useRouter } from "next/navigation";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
+import AppHeader from "@/components/AppHeader";
 
 const fetcher = (url: string) => fetch(url).then((res) => res.json());
 
@@ -11,6 +13,8 @@ interface Signal {
     id: string;
     title: string;
     content: string;
+    summary?: string;
+    rawContent?: string;
     source?: string;
     sourceUrl?: string;
     tags: string[];
@@ -20,12 +24,12 @@ interface Signal {
 export default function QueuePage() {
     const router = useRouter();
     const { data, mutate } = useSWR("/api/signals?status=unread&limit=100", fetcher);
-    // Track localized queue state
+
     const [queue, setQueue] = useState<Signal[]>([]);
     const [currentIndex, setCurrentIndex] = useState(0);
     const [thought, setThought] = useState("");
     const [processing, setProcessing] = useState(false);
-    const inputRef = useRef<HTMLInputElement>(null);
+    const inputRef = useRef<HTMLTextAreaElement>(null);
 
     // Sync SWR data to local queue state on first load
     useEffect(() => {
@@ -47,7 +51,7 @@ export default function QueuePage() {
         }
     }, [currentIndex, currentSignal]);
 
-    async function handleReview(action: "comment" | "skip") {
+    async function handleAction(action: "reviewed" | "archived" | "skip") {
         if (!currentSignal) return;
 
         setProcessing(true);
@@ -55,8 +59,14 @@ export default function QueuePage() {
 
         // Optimistic update: Move to next immediately
         setCurrentIndex((prev) => prev + 1);
+        const thoughtToSave = thought.trim();
         setThought("");
         setProcessing(false);
+
+        if (action === "skip") {
+            // Don't persist anything, just move on
+            return;
+        }
 
         try {
             // Persist to DB in background
@@ -65,15 +75,13 @@ export default function QueuePage() {
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
                     id: signalId,
-                    status: action === "comment" ? "reviewed" : "archived",
-                    thought: action === "comment" ? thought : undefined,
+                    status: action,
+                    thought: thoughtToSave || undefined,
                 }),
             });
-            // Revalidate SWR silently to keep cache relatively fresh
             mutate();
         } catch (error) {
-            console.error("Failed to review signal:", error);
-            // In a real app, we might revert the index or show a toaster
+            console.error("Failed to update signal:", error);
         }
     }
 
@@ -82,38 +90,33 @@ export default function QueuePage() {
         function handleKeyDown(e: KeyboardEvent) {
             if (isFinished) return;
 
-            // CMD+Enter or Enter (if input focused) -> Submit
-            if (e.key === "Enter" && !e.shiftKey) {
-                if (thought.trim()) {
-                    handleReview("comment");
-                } else {
-                    // Empty enter -> treat as keep/reviewed without comment? or block?
-                    // User requirement: "Once commented or skipped". 
-                    // Let's assume Enter with empty text = Reviewed (no comment)
-                    handleReview("comment");
-                }
+            // CMD/Ctrl + Enter -> Mark as reviewed with thought
+            if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+                e.preventDefault();
+                handleAction("reviewed");
             }
 
-            // Escape -> Skip
+            // Escape -> Skip (don't save anything)
             if (e.key === "Escape") {
-                handleReview("skip");
+                e.preventDefault();
+                handleAction("skip");
+            }
+
+            // CMD/Ctrl + Backspace -> Archive/Remove
+            if ((e.metaKey || e.ctrlKey) && e.key === "Backspace") {
+                e.preventDefault();
+                handleAction("archived");
             }
         }
 
         window.addEventListener("keydown", handleKeyDown);
         return () => window.removeEventListener("keydown", handleKeyDown);
-    }, [thought, isFinished, currentIndex]); // potential perf issue if logic complex, but okay here
+    }, [thought, isFinished, currentIndex]);
 
     async function handleFinishSession() {
         setProcessing(true);
-        try {
-            // Trigger auto-clustering
-            await fetch("/api/cluster", { method: "POST" });
-            router.push("/insights");
-        } catch (error) {
-            console.error("Failed to cluster:", error);
-            setProcessing(false);
-        }
+        // Generation now happens per-signal during handleAction
+        router.push("/insights");
     }
 
     if (!data) return <div className="p-8 text-center text-[var(--text-secondary)]">Loading queue...</div>;
@@ -124,7 +127,9 @@ export default function QueuePage() {
                 <div className="text-6xl">🎉</div>
                 <h1 className="text-2xl font-semibold text-[var(--text-primary)]">You're all caught up!</h1>
                 <p className="text-[var(--text-secondary)]">No unread signals in your queue.</p>
-                <Link href="/" className="btn btn-secondary">Back to Inbox</Link>
+                <button onClick={() => router.push("/insights")} className="btn btn-secondary">
+                    View Insights
+                </button>
             </div>
         );
     }
@@ -137,10 +142,9 @@ export default function QueuePage() {
                 <p className="text-[var(--text-secondary)]">You've reviewed {queue.length} signals.</p>
                 <button
                     onClick={handleFinishSession}
-                    disabled={processing}
                     className="btn btn-primary btn-lg w-64"
                 >
-                    {processing ? "Clustering..." : "Finish & Process Insights"}
+                    View Insights
                 </button>
             </div>
         );
@@ -148,41 +152,46 @@ export default function QueuePage() {
 
     return (
         <div className="min-h-screen flex flex-col bg-[var(--background)]">
+            <AppHeader />
+
             {/* Header / Progress */}
-            <header className="fixed top-0 left-0 right-0 h-1 bg-[var(--background-elevated)] z-20">
+            <header className="sticky top-16 left-0 right-0 h-1 bg-[var(--background-elevated)] z-20">
                 <div
                     className="h-full bg-[var(--accent)] transition-all duration-300"
                     style={{ width: `${progress}%` }}
                 />
             </header>
 
-            <div className="flex-1 flex flex-col items-center justify-center p-6 max-w-2xl mx-auto w-full">
-
+            <div className="flex-1 flex flex-col p-6 max-w-4xl mx-auto w-full">
                 {/* Meta Header */}
                 <div className="w-full flex justify-between items-center mb-6 text-sm text-[var(--text-secondary)] uppercase tracking-wider">
                     <span>Signal {currentIndex + 1} / {queue.length}</span>
-                    <div className="flex gap-4">
+                    <div className="flex gap-4 text-xs">
                         <span className="flex items-center gap-1"><kbd className="kbd kbd-sm">ESC</kbd> Skip</span>
-                        <span className="flex items-center gap-1"><kbd className="kbd kbd-sm">↵</kbd> Comment/Next</span>
+                        <span className="flex items-center gap-1"><kbd className="kbd kbd-sm">⌘⏎</kbd> Review</span>
+                        <span className="flex items-center gap-1"><kbd className="kbd kbd-sm">⌘⌫</kbd> Archive</span>
                     </div>
                 </div>
 
                 {/* Card */}
                 <article
-                    className="w-full bg-[var(--background-elevated)] border border-[var(--border)] rounded-2xl p-8 shadow-xl mb-8 animate-slideUp"
-                    key={currentSignal.id} // separate key to trigger animation
+                    className="w-full bg-[var(--background-elevated)] border border-[var(--border)] rounded-2xl p-8 shadow-xl mb-6 animate-slideUp overflow-hidden"
+                    key={currentSignal.id}
                 >
-                    {currentSignal.source && (
-                        <div className="flex items-center gap-2 mb-4">
-                            <span className="px-2 py-1 rounded bg-[var(--background)] text-xs text-[var(--text-secondary)] border border-[var(--border)]">
-                                {currentSignal.source}
-                            </span>
+                    {/* Source Info */}
+                    {(currentSignal.source || currentSignal.sourceUrl) && (
+                        <div className="flex items-center gap-2 mb-4 pb-4 border-b border-[var(--border)]">
+                            {currentSignal.source && (
+                                <span className="px-2 py-1 rounded bg-[var(--background)] text-xs text-[var(--text-secondary)] border border-[var(--border)]">
+                                    {currentSignal.source}
+                                </span>
+                            )}
                             {currentSignal.sourceUrl && (
                                 <a
                                     href={currentSignal.sourceUrl}
                                     target="_blank"
                                     rel="noopener noreferrer"
-                                    className="text-xs text-[var(--accent)] hover:underline truncate max-w-xs"
+                                    className="text-xs text-[var(--accent)] hover:underline truncate max-w-md"
                                 >
                                     {currentSignal.sourceUrl}
                                 </a>
@@ -190,41 +199,102 @@ export default function QueuePage() {
                         </div>
                     )}
 
+                    {/* Title */}
                     <h2 className="text-2xl font-bold text-[var(--text-primary)] mb-6 leading-tight">
                         {currentSignal.title}
                     </h2>
 
-                    <div className="prose prose-invert max-w-none text-[var(--text-secondary)] text-lg leading-relaxed max-h-[40vh] overflow-y-auto custom-scrollbar">
-                        {currentSignal.content.split('\n').map((line, i) => (
-                            <p key={i} className="mb-4">{line}</p>
-                        ))}
+                    {/* Summary (Collapsible) */}
+                    {currentSignal.summary && (
+                        <div className="mb-6 pb-6 border-b border-[var(--border)]">
+                            <details className="group">
+                                <summary className="list-none cursor-pointer flex items-center gap-2 text-sm font-medium text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors mb-3">
+                                    <svg
+                                        className="w-4 h-4 transition-transform group-open:rotate-90"
+                                        fill="none"
+                                        viewBox="0 0 24 24"
+                                        stroke="currentColor"
+                                    >
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                                    </svg>
+                                    View AI Summary
+                                </summary>
+                                <div className="prose prose-base dark:prose-invert max-w-none text-[var(--text-secondary)] leading-relaxed pl-6">
+                                    <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                                        {currentSignal.summary}
+                                    </ReactMarkdown>
+                                </div>
+                            </details>
+                        </div>
+                    )}
+
+                    {/* Main Content Body */}
+                    <div className="prose prose-lg dark:prose-invert max-w-none text-[var(--text-secondary)] leading-relaxed mb-6">
+                        <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                            {currentSignal.content}
+                        </ReactMarkdown>
                     </div>
 
-                    <div className="mt-8 flex flex-wrap gap-2">
-                        {currentSignal.tags.map(tag => (
-                            <span key={tag} className="text-sm px-3 py-1 rounded-full bg-[var(--background)] text-[var(--text-secondary)]">
-                                #{tag}
-                            </span>
-                        ))}
-                    </div>
+
+
+                    {/* Tags */}
+                    {currentSignal.tags.length > 0 && (
+                        <div className="mt-6 pt-4 border-t border-[var(--border)] flex flex-wrap gap-2">
+                            {currentSignal.tags.map(tag => (
+                                <span key={tag} className="text-sm px-3 py-1 rounded-full bg-[var(--background)] text-[var(--text-secondary)]">
+                                    #{tag}
+                                </span>
+                            ))}
+                        </div>
+                    )}
                 </article>
 
-                {/* Input Area */}
-                <div className="w-full relative">
-                    <input
+                {/* Thought Input Area */}
+                <div className="w-full bg-[var(--background-elevated)] border border-[var(--border)] rounded-2xl p-6 shadow-xl">
+                    <label className="block text-sm font-medium text-[var(--text-secondary)] mb-3">
+                        Add your thoughts (optional)
+                    </label>
+                    <textarea
                         ref={inputRef}
-                        type="text"
                         value={thought}
                         onChange={(e) => setThought(e.target.value)}
-                        placeholder="Add a thought (optional)..."
-                        className="w-full bg-transparent text-xl p-4 border-b-2 border-[var(--border)] focus:border-[var(--accent)] outline-none text-[var(--text-primary)] placeholder-[var(--text-muted)] transition-colors"
+                        placeholder="What are you thinking about this signal?"
+                        className="w-full bg-[var(--background)] text-base p-4 border border-[var(--border)] rounded-lg focus:border-[var(--accent)] focus:ring-1 focus:ring-[var(--accent)] outline-none text-[var(--text-primary)] placeholder-[var(--text-muted)] transition-colors resize-none"
+                        rows={4}
                         autoFocus
                     />
-                    <div className="absolute right-0 bottom-4 text-xs text-[var(--text-muted)]">
-                        Press Enter via keyboard
+
+                    {/* Action Buttons */}
+                    <div className="flex items-center justify-between mt-4">
+                        <button
+                            onClick={() => handleAction("archived")}
+                            disabled={processing}
+                            className="btn btn-ghost text-[var(--error)] hover:bg-red-500/10"
+                        >
+                            <svg className="w-4 h-4 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                            </svg>
+                            Archive
+                        </button>
+
+                        <div className="flex gap-3">
+                            <button
+                                onClick={() => handleAction("skip")}
+                                disabled={processing}
+                                className="btn btn-ghost"
+                            >
+                                Skip for Now
+                            </button>
+                            <button
+                                onClick={() => handleAction("reviewed")}
+                                disabled={processing}
+                                className="btn btn-primary"
+                            >
+                                {thought.trim() ? "Save & Continue" : "Mark Reviewed"}
+                            </button>
+                        </div>
                     </div>
                 </div>
-
             </div>
         </div>
     );

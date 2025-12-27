@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
-import { parseSignalTags, serializeSignalTags } from "@/lib/formatters";
-import { DEFAULT_PAGE_LIMIT } from "@/lib/constants";
-import type { SignalsResponse } from "@/lib/types";
+import { parseSignalTags } from "@/lib/formatters";
+import { DEFAULT_PAGE_LIMIT, SIGNAL_STATUS } from "@/lib/constants";
+import { triggerGenerate } from "@/lib/webhooks";
+import type { SignalsResponse, SignalWithParsedTags } from "@/lib/types";
 
 /**
  * GET /api/signals
@@ -10,7 +11,7 @@ import type { SignalsResponse } from "@/lib/types";
  * Fetches signals with optional filtering and pagination.
  * 
  * Query parameters:
- * - status: Filter by signal status (unread, reviewed, archived, clustered)
+ * - status: Filter by signal status (unread, reviewed, archived, processed)
  * - limit: Maximum signals to return (default: 50)
  * - offset: Pagination offset (default: 0)
  * 
@@ -43,10 +44,10 @@ export async function GET(request: NextRequest) {
 
         // Parse JSON tags for client consumption
         const response: SignalsResponse = {
-            signals: signals.map(signal => ({
+            signals: (signals as any[]).map(signal => ({
                 ...signal,
                 tags: parseSignalTags(signal.tags),
-            })),
+            })) as SignalWithParsedTags[],
             total,
             limit,
             offset,
@@ -101,7 +102,32 @@ export async function PATCH(request: NextRequest) {
         const signal = await prisma.signal.update({
             where: { id: body.id },
             data: { status: body.status },
+            include: {
+                thoughts: true,
+                highlights: true,
+            },
         });
+
+        // If marked as reviewed, automatically trigger insight generation for this individual signal
+        if (body.status === SIGNAL_STATUS.REVIEWED) {
+            try {
+                const structuredSignal = {
+                    ...signal,
+                    tags: parseSignalTags(signal.tags),
+                };
+
+                // Trigger generation with just this signal
+                await triggerGenerate([structuredSignal]);
+
+                // Update to processed to indicate it's been sent to n8n
+                await prisma.signal.update({
+                    where: { id: signal.id },
+                    data: { status: SIGNAL_STATUS.PROCESSED },
+                });
+            } catch (error) {
+                console.error("Failed to trigger automatic generation:", error);
+            }
+        }
 
         return NextResponse.json({
             success: true,

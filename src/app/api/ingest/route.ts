@@ -138,15 +138,19 @@ async function createSignalFromN8nData(data: N8nResponse, request: IngestRequest
         || data.summary?.substring(0, TITLE_MAX_LENGTH)
         || "Extracted Insight";
 
-    const content = formatN8nDataToMarkdown(data);
+    // 'content' should be the cleaned up body of the signal.
+    // Fall back to formatted markdown if data.content is missing.
+    const content = data.content || formatN8nDataToMarkdown(data);
     const tags = data.topics || [];
 
     return await prisma.signal.create({
         data: {
             title,
             content,
+            summary: data.summary,
             source: request.inputType,
             sourceUrl: request.url,
+            rawContent: request.content || data.rawContent,
             tags: JSON.stringify(tags),
             status: SIGNAL_STATUS.UNREAD,
         },
