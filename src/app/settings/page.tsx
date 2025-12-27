@@ -35,12 +35,20 @@ export default function SettingsPage() {
     async function fetchConfigs() {
         try {
             const res = await fetch("/api/settings/webhooks");
+
+            if (!res.ok) {
+                console.warn("API returned error status:", res.status);
+                setConfigs([]);
+                return;
+            }
+
             const data = await res.json();
-            setConfigs(data.configs);
+            const loadedConfigs = data.configs || [];
+            setConfigs(loadedConfigs);
 
             // Populate URLs from existing configs
             const urlMap: Record<string, string> = { ingest: "", format: "", publish: "" };
-            data.configs.forEach((c: WebhookConfig) => {
+            loadedConfigs.forEach((c: WebhookConfig) => {
                 if (c.name in urlMap) {
                     urlMap[c.name] = c.url;
                 }
