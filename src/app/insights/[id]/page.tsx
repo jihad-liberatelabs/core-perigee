@@ -5,6 +5,7 @@ import { useParams, useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import useSWR from "swr";
 
 interface Thought {
     id: string;
@@ -28,39 +29,28 @@ export default function InsightEditorPage() {
     const params = useParams();
     const router = useRouter();
     const insightId = params.id as string;
+    const fetcher = (url: string) => fetch(url).then((res) => res.json());
 
-    const [insight, setInsight] = useState<Insight | null>(null);
-    const [loading, setLoading] = useState(true);
+    // Consolidated state
+    const { data: insightsData, mutate } = useSWR("/api/insights", fetcher);
+    // Find the specific insight from the cached list
+    const insight = insightsData?.insights?.find((i: Insight) => i.id === insightId) || null;
+
     const [saving, setSaving] = useState(false);
     const [draftContent, setDraftContent] = useState("");
     const [mode, setMode] = useState<"edit" | "preview">("preview");
     const [isExpanded, setIsExpanded] = useState(false);
     const [actionLoading, setActionLoading] = useState(false);
     const [actionError, setActionError] = useState<string | null>(null);
+    const [isLoaded, setIsLoaded] = useState(false);
 
-    const fetchInsight = useCallback(async () => {
-        try {
-            const res = await fetch(`/api/insights`);
-            const data = await res.json();
-            const found = data.insights.find((i: Insight) => i.id === insightId);
-            if (!found) {
-                router.push("/insights");
-                return;
-            }
-            setInsight(found);
-            // Default to preview content if it exists, otherwise core insight
-            setDraftContent(found.preview || found.coreInsight || "");
-        } catch (error) {
-            console.error("Failed to fetch insight:", error);
-            router.push("/insights");
-        } finally {
-            setLoading(false);
-        }
-    }, [insightId, router]);
-
+    // Sync draft content with insight data when loaded
     useEffect(() => {
-        fetchInsight();
-    }, [fetchInsight]);
+        if (insight && !isLoaded) {
+            setDraftContent(insight.preview || insight.coreInsight || "");
+            setIsLoaded(true);
+        }
+    }, [insight, isLoaded]);
 
     async function saveDraft() {
         if (!draftContent.trim()) return;
@@ -75,7 +65,7 @@ export default function InsightEditorPage() {
                     preview: draftContent, // Saving to preview field as it is the draft
                 }),
             });
-            // Update local state to reflect saved status if needed
+            mutate(); // Refresh SWR cache
         } catch (error) {
             console.error("Failed to save draft:", error);
         } finally {
@@ -107,28 +97,18 @@ export default function InsightEditorPage() {
                 throw new Error(data.error || "Failed to trigger publish");
             }
 
-            // Poll for status update
-            let attempts = 0;
-            const poll = async () => {
-                attempts++;
-                await fetchInsight();
+            // Simple poll-like refresh
+            setTimeout(() => mutate(), 2000);
+            setTimeout(() => mutate(), 5000);
 
-                if (insight?.status === "published" || attempts >= 30) {
-                    setActionLoading(false);
-                    return;
-                }
-
-                setTimeout(poll, 2000);
-            };
-
-            setTimeout(poll, 2000);
+            setActionLoading(false);
         } catch (error) {
             setActionError(error instanceof Error ? error.message : "Failed to publish");
             setActionLoading(false);
         }
     }
 
-    if (loading) {
+    if (!insight && !insightsData) {
         return (
             <div className="min-h-screen flex items-center justify-center" style={{ background: "var(--background)" }}>
                 <div className="skeleton w-16 h-16 rounded-full" />
@@ -136,7 +116,13 @@ export default function InsightEditorPage() {
         );
     }
 
-    if (!insight) return null;
+    if (insightsData && !insight) {
+        return (
+            <div className="min-h-screen flex items-center justify-center text-[var(--text-muted)]">
+                Insight not found
+            </div>
+        );
+    }
 
     return (
         <div className="min-h-screen flex flex-col" style={{ background: "var(--background)" }}>
