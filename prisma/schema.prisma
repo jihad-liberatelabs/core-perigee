@@ -1,0 +1,70 @@
+// Prisma schema for Signal Desk
+// Personal Signal-to-Insight Operating System
+
+generator client {
+  provider = "prisma-client-js"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "sqlite"
+}
+
+model Signal {
+  id          String      @id @default(cuid())
+  title       String
+  content     String
+  source      String?     // RSS, YouTube, PDF, Manual, etc.
+  sourceUrl   String?
+  tags        String      @default("[]") // JSON array stored as string for SQLite
+  status      String      @default("unread") // unread, reviewed, archived
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+  highlights  Highlight[]
+  thoughts    Thought[]
+  insights    Insight[]
+}
+
+model Highlight {
+  id        String   @id @default(cuid())
+  text      String
+  note      String?
+  startPos  Int?     // Optional position info
+  endPos    Int?
+  signalId  String
+  signal    Signal   @relation(fields: [signalId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+}
+
+model Thought {
+  id        String   @id @default(cuid())
+  content   String
+  signalId  String?
+  signal    Signal?  @relation(fields: [signalId], references: [id], onDelete: SetNull)
+  insightId String?
+  insight   Insight? @relation(fields: [insightId], references: [id], onDelete: SetNull)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Insight {
+  id             String    @id @default(cuid())
+  coreInsight    String
+  status         String    @default("draft") // draft, formatting, previewing, published
+  preview        String?   // Formatted content from n8n
+  previewPlatform String?  // linkedin, twitter, etc.
+  publishedUrl   String?
+  publishedAt    DateTime?
+  thoughts       Thought[]
+  signals        Signal[]
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+}
+
+model WebhookConfig {
+  id        String   @id @default(cuid())
+  name      String   @unique // ingest, format, publish
+  url       String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
