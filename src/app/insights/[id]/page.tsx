@@ -47,7 +47,7 @@ export default function InsightEditorPage() {
     // Sync draft content with insight data when loaded
     useEffect(() => {
         if (insight && !isLoaded) {
-            setDraftContent(insight.preview || insight.coreInsight || "");
+            setDraftContent(insight.coreInsight || insight.preview || "");
             setIsLoaded(true);
         }
     }, [insight, isLoaded]);
@@ -62,7 +62,8 @@ export default function InsightEditorPage() {
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
                     id: insightId,
-                    preview: draftContent, // Saving to preview field as it is the draft
+                    preview: draftContent,
+                    coreInsight: draftContent,
                 }),
             });
             mutate(); // Refresh SWR cache
