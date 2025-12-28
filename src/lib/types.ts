@@ -20,6 +20,8 @@ export interface N8nResponse {
     sourceUrl?: string; // Original source URL
     title?: string;
     rawContent?: string;
+    // Ingest/Signal workflow specific
+    signalId?: string;  // For updating existing signals
     // Publish workflow specific
     postUrl?: string;   // Published post URL
     status?: string;    // success/failed

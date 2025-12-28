@@ -34,15 +34,71 @@ export async function POST(request: NextRequest) {
             );
         }
 
-        // Create Signal from extracted data
-        const signal = await createSignalFromWebhook(data);
+        // Create or Update Signal from extracted data
+        let signalId = data.signalId;
+        let signal;
 
-        console.log("Created signal:", signal.id);
+        // If no ID provided, try to find a matching placeholder signal (deduplication)
+        if (!signalId) {
+            console.log("No signalId provided, attempting deduplication...");
+
+            // Look for recent signals (created in last 10 mins) that are in processing state
+            const fiveMinsAgo = new Date(Date.now() - 10 * 60 * 1000);
+
+            const whereClause: any = {
+                status: "processing", // Only match pending placeholders
+                createdAt: { gte: fiveMinsAgo },
+            };
+
+            // Match by URL if available
+            if (data.sourceUrl) {
+                whereClause.sourceUrl = data.sourceUrl;
+            }
+            // OR match by Raw Content (for text notes) - crude but helpful 
+            else if (data.content && data.content.length > 20) {
+                // We can't query rawContent easily if it's large text search, 
+                // so we might skip text deduplication or rely on source=text
+                // Let's rely on sourceUrl first.
+                // For text, we might leave it as new unless we stored a hash.
+            }
+
+            if (whereClause.sourceUrl) {
+                const existing = await prisma.signal.findFirst({
+                    where: whereClause,
+                    orderBy: { createdAt: 'desc' }
+                });
+
+                if (existing) {
+                    console.log(`Found matching placeholder signal: ${existing.id}`);
+                    signalId = existing.id;
+                }
+            }
+        }
+
+        if (signalId) {
+            console.log("Updating existing signal:", signalId);
+            signal = await prisma.signal.update({
+                where: { id: signalId },
+                data: {
+                    title: data.title || data.summary?.substring(0, TITLE_MAX_LENGTH) || undefined,
+                    content: data.content || formatN8nDataToMarkdown(data),
+                    summary: data.summary,
+                    rawContent: data.rawContent,
+                    tags: data.topics ? JSON.stringify(data.topics) : undefined,
+                    status: SIGNAL_STATUS.UNREAD, // Mark as ready for review
+                },
+            });
+        } else {
+            console.log("Creating new signal (no ID or match found)");
+            signal = await createSignalFromWebhook(data);
+        }
+
+        console.log("Processed signal:", signal.id);
 
         return NextResponse.json({
             success: true,
             signalId: signal.id,
-            message: "Signal processed and stored",
+            message: signalId ? "Signal updated" : "Signal created",
         }, { status: 201 });
 
     } catch (error) {

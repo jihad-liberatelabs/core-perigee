@@ -49,49 +49,81 @@ export async function POST(request: NextRequest) {
             );
         }
 
-        // Build payload for n8n workflow
+        // Detect if it's a URL or text for initial title/source
+        const isUrl = body.inputType === "url" || body.inputType === "youtube";
+        const initialTitle = body.title || (isUrl ? "Processing URL..." : "Shared Note");
+
+        // 1. Create a placeholder signal immediately
+        const signal = await prisma.signal.create({
+            data: {
+                title: initialTitle,
+                content: "Content is being processed by AI...",
+                source: body.inputType,
+                sourceUrl: body.url,
+                rawContent: body.content,
+                status: SIGNAL_STATUS.PROCESSING, // Using a temporary status or keeping as unread
+                tags: "[]",
+            },
+        });
+
+        // 2. Build payload for n8n workflow with the signalId
         const payload: Record<string, string> = {
             inputType: body.inputType,
+            signalId: signal.id, // Pass ID for callback update
         };
 
-        if (body.content) {
-            payload.content = body.content;
-        }
-        if (body.url) {
-            payload.url = body.url;
-        }
+        if (body.content) payload.content = body.content;
+        if (body.url) payload.url = body.url;
 
-        // Trigger n8n ingestion workflow
+        // 3. Trigger n8n ingestion workflow
         const result = await triggerIngest(payload);
 
         console.log("triggerIngest result:", JSON.stringify(result, null, 2));
 
         if (!result.success) {
+            // Update signal to show failure
+            await prisma.signal.update({
+                where: { id: signal.id },
+                data: {
+                    content: `AI Processing Failed: ${result.error}. You can still review the raw content below.`,
+                    status: SIGNAL_STATUS.UNREAD
+                }
+            });
+
             return NextResponse.json(
                 { error: result.error },
                 { status: 502 }
             );
         }
 
-        // If n8n returns data synchronously, create signal immediately
+        // 4. Handle synchronous response if available
         if (result.data) {
-            const data = result.data;
-            console.log("Creating signal from n8n data:", JSON.stringify(data, null, 2));
+            const data = result.data as any; // Cast for flexible checking
 
-            const signal = await createSignalFromN8nData(data, body);
+            // Check if this is a real insight response or just a confirmation
+            const hasContent = data.summary || data.key_insights || data.topics;
 
-            return NextResponse.json({
-                success: true,
-                message: "Signal processed and stored",
-                signalId: signal.id,
-                insights: data.key_insights,
-            }, { status: 201 });
+            if (hasContent) {
+                console.log("Updating signal from n8n data:", JSON.stringify(data, null, 2));
+                // Reuse existing helper but update instead of create
+                await updateSignalWithN8nData(signal.id, result.data, body);
+
+                return NextResponse.json({
+                    success: true,
+                    message: "Signal processed and stored",
+                    signalId: signal.id,
+                    insights: data.key_insights,
+                }, { status: 201 });
+            } else {
+                console.log("n8n returned confirmation, continuing async:", JSON.stringify(data));
+            }
         }
 
-        // n8n processing asynchronously - signal will be created via webhook
+        // Return immediately for async - webhook will handle the rest
         return NextResponse.json({
             success: true,
             message: "Content sent to n8n for processing",
+            signalId: signal.id
         });
 
     } catch (error) {
@@ -101,6 +133,31 @@ export async function POST(request: NextRequest) {
             { status: 500 }
         );
     }
+}
+
+/**
+ * Updates an existing Signal record with data from n8n
+ */
+async function updateSignalWithN8nData(id: string, data: N8nResponse, request: IngestRequest) {
+    const title = request.title
+        || data.title
+        || data.summary?.substring(0, TITLE_MAX_LENGTH)
+        || "Extracted Insight";
+
+    const content = data.content || formatN8nDataToMarkdown(data);
+    const tags = data.topics || [];
+
+    return await prisma.signal.update({
+        where: { id },
+        data: {
+            title,
+            content,
+            summary: data.summary,
+            rawContent: request.content || data.rawContent,
+            tags: JSON.stringify(tags),
+            status: SIGNAL_STATUS.UNREAD,
+        },
+    });
 }
 
 /**
@@ -122,37 +179,4 @@ export async function GET() {
     });
 }
 
-// ============================================================================
-// Helper Functions
-// ============================================================================
 
-/**
- * Creates a Signal database record from n8n response data
- * 
- * @param data - Structured data from n8n workflow
- * @param request - Original ingest request
- * @returns Created Signal record
- */
-async function createSignalFromN8nData(data: N8nResponse, request: IngestRequest) {
-    const title = request.title
-        || data.summary?.substring(0, TITLE_MAX_LENGTH)
-        || "Extracted Insight";
-
-    // 'content' should be the cleaned up body of the signal.
-    // Fall back to formatted markdown if data.content is missing.
-    const content = data.content || formatN8nDataToMarkdown(data);
-    const tags = data.topics || [];
-
-    return await prisma.signal.create({
-        data: {
-            title,
-            content,
-            summary: data.summary,
-            source: request.inputType,
-            sourceUrl: request.url,
-            rawContent: request.content || data.rawContent,
-            tags: JSON.stringify(tags),
-            status: SIGNAL_STATUS.UNREAD,
-        },
-    });
-}

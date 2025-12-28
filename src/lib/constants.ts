@@ -8,6 +8,7 @@
 
 export const SIGNAL_STATUS = {
     UNREAD: "unread",
+    PROCESSING: "processing",
     REVIEWED: "reviewed",
     PROCESSED: "processed",
     ARCHIVED: "archived",
