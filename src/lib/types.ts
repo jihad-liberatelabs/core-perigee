@@ -17,9 +17,13 @@ export interface N8nResponse {
     topics?: string[];
     sentiment?: string;
     source?: string;
-    sourceUrl?: string;
+    sourceUrl?: string; // Original source URL
     title?: string;
     rawContent?: string;
+    // Publish workflow specific
+    postUrl?: string;   // Published post URL
+    status?: string;    // success/failed
+    error?: string;
 }
 
 /**

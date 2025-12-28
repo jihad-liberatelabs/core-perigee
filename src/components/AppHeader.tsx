@@ -17,7 +17,8 @@ export default function AppHeader() {
      */
     const isActive = (path: string) => {
         if (path === "/") return pathname === "/" || pathname === "/capture";
-        if (path === "/queue") return pathname === "/queue";
+        if (path === "/queue") return pathname === "/queue" || pathname.startsWith("/review");
+        if (path === "/insights") return pathname.startsWith("/insights");
         return pathname === path;
     };
 

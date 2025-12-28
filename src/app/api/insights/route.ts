@@ -130,6 +130,12 @@ export async function PATCH(request: NextRequest) {
                 );
             }
 
+            // Set status to publishing immediately
+            await prisma.insight.update({
+                where: { id: insight.id },
+                data: { status: "publishing" }
+            });
+
             const result = await triggerPublish({
                 insightId: insight.id,
                 formattedContent: insight.preview || insight.coreInsight,
@@ -137,10 +143,34 @@ export async function PATCH(request: NextRequest) {
             });
 
             if (!result.success) {
+                // Revert status on failure
+                await prisma.insight.update({
+                    where: { id: insight.id },
+                    data: { status: "draft" }
+                });
+
                 return NextResponse.json(
                     { error: result.error },
                     { status: 502 }
                 );
+            }
+
+            // Handle synchronous success response from n8n
+            if (result.data && result.data.status === "success" && result.data.postUrl) {
+                const pubInsight = await prisma.insight.update({
+                    where: { id: insight.id },
+                    data: {
+                        status: "published",
+                        publishedUrl: result.data.postUrl,
+                        publishedAt: new Date(),
+                    },
+                });
+
+                return NextResponse.json({
+                    success: true,
+                    message: "Insight published successfully",
+                    insight: pubInsight
+                });
             }
 
             return NextResponse.json({

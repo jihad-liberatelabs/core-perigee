@@ -163,6 +163,21 @@ export async function triggerPublish(payload: PublishPayload): Promise<WebhookRe
             throw new Error(`Webhook returned ${response.status}`);
         }
 
+        // Try to parse response data if available (synchronous workflow)
+        try {
+            const responseText = await response.text();
+            if (responseText && responseText.trim() !== "") {
+                const data = JSON.parse(responseText);
+                console.log("Publish webhook response:", data);
+                // Handle nested structure if necessary (similar to ingest)
+                let cleanData = data;
+                if (Array.isArray(data) && data.length > 0) cleanData = data[0];
+                return { success: true, data: cleanData };
+            }
+        } catch (e) {
+            console.log("Could not parse publish response, assuming successful async trigger", e);
+        }
+
         return { success: true };
     } catch (error) {
         console.error("Publish webhook error:", error);
