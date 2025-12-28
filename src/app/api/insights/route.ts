@@ -49,29 +49,61 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
     try {
         const body = await request.json();
+        console.log("POST /api/insights payload:", JSON.stringify(body, null, 2));
 
-        if (!body.coreInsight) {
+        // Unwrap n8n array/nested structure
+        let data = body;
+        if (Array.isArray(body) && body.length > 0) {
+            data = body[0];
+        }
+        if (data.output && typeof data.output === "object") {
+            data = { ...data, ...data.output };
+        }
+
+        if (!data.coreInsight) {
             return NextResponse.json(
                 { error: "coreInsight is required" },
                 { status: 400 }
             );
         }
 
+        // Validate and filter thoughtIds
+        let connectThoughts = undefined;
+        if (data.thoughtIds?.length) {
+            const validThoughts = await prisma.thought.findMany({
+                where: { id: { in: data.thoughtIds } },
+                select: { id: true },
+            });
+            if (validThoughts.length > 0) {
+                connectThoughts = {
+                    connect: validThoughts.map((t) => ({ id: t.id })),
+                };
+            }
+        }
+
+        // Validate and filter signalIds
+        let connectSignals = undefined;
+        if (data.signalIds?.length) {
+            const validSignals = await prisma.signal.findMany({
+                where: { id: { in: data.signalIds } },
+                select: { id: true },
+            });
+            if (validSignals.length > 0) {
+                connectSignals = {
+                    connect: validSignals.map((s) => ({ id: s.id })),
+                };
+            }
+        }
+
         // Create insight
         const insight = await prisma.insight.create({
             data: {
-                coreInsight: body.coreInsight,
-                preview: body.preview || body.coreInsight, // Default preview to coreInsight if not provided
-                previewPlatform: body.previewPlatform || "linkedin",
+                coreInsight: data.coreInsight,
+                preview: data.preview || data.coreInsight,
+                previewPlatform: data.previewPlatform || "linkedin",
                 status: "draft",
-                // Link thoughts if provided
-                thoughts: body.thoughtIds?.length ? {
-                    connect: body.thoughtIds.map((id: string) => ({ id }))
-                } : undefined,
-                // Link signals directly if provided (AI workflow)
-                signals: body.signalIds?.length ? {
-                    connect: body.signalIds.map((id: string) => ({ id }))
-                } : undefined,
+                thoughts: connectThoughts,
+                signals: connectSignals,
             },
             include: {
                 thoughts: {
