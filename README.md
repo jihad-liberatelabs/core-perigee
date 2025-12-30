@@ -10,12 +10,13 @@ Core Perigee is designed as a **decoupled, event-driven system** that separates 
 
 1.  **Next.js Frontend (App Router)**:
     *   Serves as the primary Command Center.
+    *   Built with **Next.js 16** (App Router) and **Tailwind CSS v4**.
     *   Handles UI for signal capture, manual review, and insight management.
     *   Uses **SWR** for real-time UI updates and data fetching.
     *   Implements **API Routes** as a gateway for both the frontend and external webhook callbacks.
 
-2.  **Data Layer (Prisma + SQLite)**:
-    *   Uses **SQLite** for local, high-performance data storage.
+2.  **Data Layer (Prisma + PostgreSQL)**:
+    *   Uses **PostgreSQL** as the primary database provider.
     *   **Prisma ORM** provides type-safe database access and handles schema migrations.
     *   The schema is designed to maintain relational integrity between raw signals, user thoughts, and synthesized insights.
 
@@ -29,7 +30,7 @@ Core Perigee is designed as a **decoupled, event-driven system** that separates 
 The system follows a linear progression from raw data to published content:
 
 1.  **Ingestion**: Raw inputs (text, URLs, YouTube links) are sent to the `Ingest` webhook. n8n extracts content, generates summaries, and identifies key entities, which are then saved as **Signals**.
-2.  **Review**: The user reviews Signals in the **Review Queue**, adding **Highlights** and **Thoughts** to refine the information.
+2.  **Review**: The user reviews Signals in the **Inbox**, adding **Highlights** and **Thoughts** to refine the information.
 3.  **Clustering**: Related signals are grouped together via the `Cluster` webhook to identify underlying themes or "Signal Clouds."
 4.  **Synthesis**: The `Generate` webhook processes these clusters to synthesize a **Core Insight**.
 5.  **Distribution**: The `Format` and `Publish` webhooks prepare the insight for specific platforms (LinkedIn, Twitter, etc.) and handle the final posting.
@@ -49,7 +50,7 @@ graph TD
     subgraph "Signal Desk (Next.js)"
         UI[User Interface]
         API[API Routes]
-        DB[(Prisma / SQLite)]
+        DB[(PostgreSQL)]
     end
 
     subgraph "Automation (n8n)"
@@ -69,7 +70,6 @@ graph TD
     GW -- "Callback (POST)" --> API
 ```
 
-
 ## 🚀 Getting Started
 
 Follow these steps to set up the project locally.
@@ -77,6 +77,7 @@ Follow these steps to set up the project locally.
 ### Prerequisites
 - [Node.js](https://nodejs.org/) (v18 or higher recommended)
 - [npm](https://www.npmjs.com/) or [yarn](https://yarnpkg.com/)
+- PostgreSQL Database URL
 
 ### Installation
 
@@ -91,19 +92,23 @@ Follow these steps to set up the project locally.
    npm install
    ```
 
-3. **Database Setup**:
-   Initialize the SQLite database and generate the Prisma client:
-   ```bash
-   npx prisma generate
-   npx prisma migrate dev --name init
+3. **Environment Setup**:
+   Create a `.env` file in the root directory and add your database connection string:
+   ```env
+   DATABASE_URL="postgresql://user:password@localhost:5432/core_perigee?schema=public"
    ```
 
-4. **Configuration**:
+4. **Database Setup**:
+   Generate the Prisma client and push the schema:
+   ```bash
+   npx prisma generate
+   npx prisma db push
+   ```
+
+5. **Configuration**:
    The application relies on webhooks for advanced processing. Once the app is running, navigate to the **Settings** page in the UI to configure your webhook URLs for:
    - **Ingest**: Processing raw input (URLs, text).
-   - **Cluster**: Grouping related signals.
    - **Generate**: AI-driven insight creation.
-   - **Format**: Social media post formatting.
    - **Publish**: Finalizing and posting content.
 
 ### Development
@@ -121,7 +126,7 @@ Open [http://localhost:3000](http://localhost:3000) to access the Signal Desk.
 - `src/components/`: Reusable UI components.
 - `src/lib/`: Core utilities, Prisma client, and webhook handlers.
 - `prisma/`: Database schema and migrations.
-- `scripts/`: Maintenance and utility scripts (e.g., `debug_webhooks.ts`).
+- `scripts/`: Maintenance and utility scripts.
 
 ## 🛠 Features
 

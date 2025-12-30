@@ -5,6 +5,8 @@ import { DEFAULT_PAGE_LIMIT, SIGNAL_STATUS } from "@/lib/constants";
 import { triggerGenerate } from "@/lib/webhooks";
 import type { SignalsResponse, SignalWithParsedTags } from "@/lib/types";
 
+export const dynamic = 'force-dynamic';
+
 /**
  * GET /api/signals
  * 

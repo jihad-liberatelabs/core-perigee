@@ -31,12 +31,26 @@ export default function QueuePage() {
     const [processing, setProcessing] = useState(false);
     const inputRef = useRef<HTMLTextAreaElement>(null);
 
-    // Sync SWR data to local queue state on first load
+    // Sync SWR data to local queue state
     useEffect(() => {
-        if (data?.signals && queue.length === 0) {
+        if (!data?.signals) return;
+
+        // 1. Initial load
+        if (queue.length === 0) {
             setQueue(data.signals);
+            return;
         }
-    }, [data, queue.length]);
+
+        // 2. Fresh catch sync: If at start of session, update if signals changed
+        if (currentIndex === 0 && thought === "") {
+            const currentIds = queue.map((s: Signal) => s.id).join(",");
+            const newIds = data.signals.map((s: Signal) => s.id).join(",");
+
+            if (currentIds !== newIds) {
+                setQueue(data.signals);
+            }
+        }
+    }, [data, currentIndex, thought]);
 
     const currentSignal = queue[currentIndex];
     const isFinished = queue.length > 0 && currentIndex >= queue.length;

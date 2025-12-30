@@ -2,13 +2,16 @@
 
 import { useState, useRef, useEffect } from "react";
 import { useRouter } from "next/navigation";
+import { useSWRConfig } from "swr";
 import AppHeader from "@/components/AppHeader";
 
 export default function CapturePage() {
     const router = useRouter();
+    const { mutate } = useSWRConfig();
     const [input, setInput] = useState("");
     const [submitting, setSubmitting] = useState(false);
     const [error, setError] = useState("");
+    const [success, setSuccess] = useState(false);
     const inputRef = useRef<HTMLTextAreaElement>(null);
 
     // Auto-focus on mount
@@ -23,6 +26,7 @@ export default function CapturePage() {
         if (!trimmedInput) return;
 
         setError("");
+        setSuccess(false);
         setSubmitting(true);
 
         try {
@@ -50,11 +54,23 @@ export default function CapturePage() {
                 throw new Error(data.error || "Failed to capture signal");
             }
 
-            // Clear form
-            setInput("");
+            // Invalidate cache for signals
+            mutate(
+                (key) => typeof key === 'string' && key.startsWith('/api/signals'),
+                undefined,
+                { revalidate: true }
+            );
 
-            // Show success and redirect to queue
-            router.push("/queue");
+            // Clear form and show success
+            setInput("");
+            setSuccess(true);
+
+            // Reset success message after 3 seconds
+            setTimeout(() => setSuccess(false), 3000);
+
+            // Keep focus for rapid entry
+            inputRef.current?.focus();
+
         } catch (err) {
             setError(err instanceof Error ? err.message : "Something went wrong");
         } finally {
@@ -113,6 +129,13 @@ export default function CapturePage() {
                         {error && (
                             <div className="p-4 bg-red-500/10 border border-red-500/20 rounded-xl text-red-500 text-sm animate-fadeIn">
                                 {error}
+                            </div>
+                        )}
+
+                        {/* Success Message */}
+                        {success && (
+                            <div className="p-4 bg-green-500/10 border border-green-500/20 rounded-xl text-green-500 text-sm animate-fadeIn mb-6">
+                                Signal captured successfully! Ready for the next one.
                             </div>
                         )}
 

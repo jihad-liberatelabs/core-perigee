@@ -76,11 +76,11 @@ export default function CaptureBar({ onSignalAdded }: CaptureBarProps) {
             // Reset UI and show success
             setInput("");
             setStatus("success");
+            onSignalAdded?.();
 
-            // Trigger parent refresh after delay
+            // Reset status after delay
             setTimeout(() => {
                 setStatus("idle");
-                onSignalAdded?.();
             }, 2000);
 
         } catch (error) {
